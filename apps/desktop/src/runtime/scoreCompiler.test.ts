@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Project } from '../domain/project';
 import { compileProject, ScoreCompilerError, serializeCompiledShow, type ScoreCompilerErrorCode } from './scoreCompiler';
 
-const project = (): Project => ({ schemaVersion: 2, id: 'project', name: 'Show', createdAt: '2025-01-01T00:00:00.000Z', updatedAt: '2025-01-01T00:00:00.000Z', audio: null, deviceBindings: [], score: { version: 1, events: [] }, costumes: [
+const project = (): Project => ({ schemaVersion: 3, id: 'project', name: 'Show', createdAt: '2025-01-01T00:00:00.000Z', updatedAt: '2025-01-01T00:00:00.000Z', audio: null, deviceBindings: [], score: { version: 1, events: [] }, costumes: [
   { id: 'costume-b', name: 'B', master: { id: 'master-b', displayName: 'B', type: 'esp32', slaves: [{ id: 'pico-b', displayName: 'B', type: 'raspberry-pi-pico', logicalAddress: 2, channels: [{ id: 'channel-b', displayName: 'B', type: 'el-wire', hardwareOutputIdentifier: 'OUT2' }] }] } },
   { id: 'costume-a', name: 'A', master: { id: 'master-a', displayName: 'A', type: 'esp32', slaves: [{ id: 'pico-a2', displayName: 'A2', type: 'raspberry-pi-pico', logicalAddress: 3, channels: [{ id: 'channel-c', displayName: 'C', type: 'el-wire', hardwareOutputIdentifier: 'OUT3' }] }, { id: 'pico-a1', displayName: 'A1', type: 'raspberry-pi-pico', logicalAddress: 1, channels: [{ id: 'channel-a', displayName: 'A', type: 'el-wire', hardwareOutputIdentifier: 'OUT1' }] }] } },
 ] });

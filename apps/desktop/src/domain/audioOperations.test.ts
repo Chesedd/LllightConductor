@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import type { Project } from './project';
 import { removeProjectAudio, setProjectAudio } from './audioOperations';
-const base: Project = { schemaVersion: 2, id: 'p', name: 'Show', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', audio: null, costumes: [], score: { version: 1, events: [] }, deviceBindings: [] };
+const base: Project = { schemaVersion: 3, id: 'p', name: 'Show', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', audio: null, costumes: [], score: { version: 1, events: [] }, deviceBindings: [] };
 describe('audio project operations', () => { it('imports, replaces, locates, and removes one track', () => { const imported = setProjectAudio(base, { displayName: 'song.mp3', uri: 'C:\\Music\\song.mp3', durationMs: 12_345, mediaType: 'audio/mpeg' }, () => 'audio', '2026-02-01T00:00:00.000Z'); expect(imported.audio).toMatchObject({ id: 'audio', durationMs: 12345, reference: { type: 'external-uri', uri: 'C:\\Music\\song.mp3' } }); const located = setProjectAudio(imported, { displayName: 'found.wav', uri: '/found.wav', durationMs: 20_000 }, () => 'other', '2026-02-02T00:00:00.000Z'); expect(located.audio).toMatchObject({ id: 'audio', displayName: 'found.wav' }); expect(removeProjectAudio(located, '2026-02-03T00:00:00.000Z').audio).toBeNull(); }); });

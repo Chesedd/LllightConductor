@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createStableId, type ChannelId, type ControllerId, type CostumeId, type EntityId, type Project } from '../../domain/project';
-import { addChannel, addCostume, addSlave, changeChannelHardwareOutputIdentifier, changeSlaveLogicalAddress, removeChannel, removeCostume, removeSlave, renameChannel, renameCostume, renameMaster, renameSlave, reorderChannels, reorderCostumes, reorderSlaves } from '../../domain/projectOperations';
+import { addChannel, addCostume, addSlave, autoAssignChannelProtocolOutputIds, changeChannelHardwareOutputIdentifier, changeSlaveLogicalAddress, removeChannel, removeCostume, removeSlave, renameChannel, renameCostume, renameMaster, renameSlave, reorderChannels, reorderCostumes, reorderSlaves, setChannelProtocolOutputId } from '../../domain/projectOperations';
 import { ProjectService } from '../../application/projectService';
 import { ProjectWorkspace, type UnsavedDecision, type WorkspaceSnapshot } from '../../application/projectWorkspace';
 import { InMemoryProjectRepository } from '../../persistence/projectRepository';
@@ -13,6 +13,8 @@ import { timelineTime, type TimelineTimeMs } from '../../domain/timelineTime';
 import { WaveformCache, WebAudioWaveformExtractor, type WaveformData, type WaveformExtractor } from '../../media/waveform';
 import { compileProject, ScoreCompilerError, serializeCompiledShow } from '../../runtime/scoreCompiler';
 import type { CompiledShowV1 } from '../../runtime/runtimeScore';
+import { PreparationError, prepareCompiledShow, serializePreparedShow } from '../../preparation/prepareCompiledShow';
+import type { PreparedShowBundleV1 } from '../../preparation/preparedShow';
 
 export type Section = 'Projects' | 'Editor' | 'Devices' | 'Settings';
 interface AppStateValue extends WorkspaceSnapshot {
@@ -21,6 +23,7 @@ interface AppStateValue extends WorkspaceSnapshot {
   openRecent: (path: string) => Promise<void>; removeRecent: (path: string) => Promise<void>; save: () => Promise<void>; saveAs: () => Promise<void>;
   updateProject: (project: Project) => void; clearError: () => void;
   compilation: { result: CompiledShowV1 | null; compile: () => boolean; clear: () => void; serialized: () => string | null };
+  preparation: { result: PreparedShowBundleV1 | null; prepare: () => boolean; serialized: () => string | null };
   undo: () => boolean; redo: () => boolean;
   audio: {
     availability: 'none' | 'loading' | 'ready' | 'missing' | 'error'; transport: PlaybackState;
@@ -31,7 +34,7 @@ interface AppStateValue extends WorkspaceSnapshot {
   topology: {
     addCostume: (name: string) => boolean; renameCostume: (id: CostumeId, name: string) => boolean; deleteCostume: (id: CostumeId) => boolean; moveCostume: (from: number, to: number) => boolean;
     renameMaster: (id: ControllerId, name: string) => boolean; addPico: (masterId: ControllerId, name: string) => boolean; renamePico: (id: ControllerId, name: string) => boolean; setPicoAddress: (id: ControllerId, address: number) => boolean; deletePico: (id: ControllerId) => boolean; movePico: (masterId: ControllerId, from: number, to: number) => boolean;
-    addChannel: (picoId: ControllerId, name: string, output: string) => boolean; renameChannel: (id: ChannelId, name: string) => boolean; setChannelOutput: (id: ChannelId, output: string) => boolean; deleteChannel: (id: ChannelId) => boolean; moveChannel: (picoId: ControllerId, from: number, to: number) => boolean;
+    addChannel: (picoId: ControllerId, name: string, output: string) => boolean; renameChannel: (id: ChannelId, name: string) => boolean; setChannelOutput: (id: ChannelId, output: string) => boolean; setChannelProtocolOutputId: (id: ChannelId, outputId: number | undefined) => boolean; autoAssignOutputIds: (picoId: ControllerId) => boolean; deleteChannel: (id: ChannelId) => boolean; moveChannel: (picoId: ControllerId, from: number, to: number) => boolean;
   };
   score: { add: (input: { channelId: ChannelId; startMs: TimelineTimeMs; endMs: TimelineTimeMs }) => boolean; addMany: (inputs: { channelId: ChannelId; startMs: TimelineTimeMs; endMs: TimelineTimeMs }[]) => EntityId[] | null; move: (id: EntityId, startMs: TimelineTimeMs) => boolean; moveMany: (ids: EntityId[], deltaMs: TimelineTimeMs) => boolean; resize: (id: EntityId, input: { startMs?: TimelineTimeMs; endMs?: TimelineTimeMs }) => boolean; remove: (id: EntityId) => boolean; removeMany: (ids: EntityId[]) => boolean };
 }
@@ -42,6 +45,7 @@ export function AppStateProvider({ children, workspace: supplied, playback: supp
   const creator = useMemo(() => new ProjectService(new InMemoryProjectRepository()), []);
   const [snapshot, setSnapshot] = useState(workspace.snapshot()); const [section, setSection] = useState<Section>('Projects'); const [error, setError] = useState<string | null>(null);
   const [compiled, setCompiled] = useState<CompiledShowV1 | null>(null);
+  const [prepared, setPrepared] = useState<PreparedShowBundleV1 | null>(null);
   const playback = useMemo(() => suppliedPlayback ?? new AudioPlaybackController(new HtmlAudioPlaybackAdapter()), [suppliedPlayback]);
   const media = useMemo(() => suppliedMedia ?? new AudioMediaService(new TauriAudioMediaGateway()), [suppliedMedia]);
   const waveformExtractor = useMemo(() => suppliedExtractor ?? new WebAudioWaveformExtractor(), [suppliedExtractor]);
@@ -54,11 +58,12 @@ export function AppStateProvider({ children, workspace: supplied, playback: supp
   const run = async (operation: () => Promise<unknown>) => { try { setError(null); await operation(); sync(); } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); sync(); } };
   const confirmUnsaved = () => new Promise<UnsavedDecision>(resolve => { resolver.current = resolve; setConfirming(true); });
   const decide = (choice: UnsavedDecision) => { setConfirming(false); resolver.current?.(choice); resolver.current = null; };
-  const edit = (operation: (project: Project, timestamp: Date) => Project) => { try { setError(null); workspace.editProject(operation); setCompiled(null); sync(); return true; } catch (cause) { setError(friendlyError(cause)); sync(); return false; } };
-  const workspaceAction = <T,>(operation: () => T): T | null => { try { setError(null); const result = operation(); setCompiled(null); sync(); return result; } catch (cause) { setError(friendlyError(cause)); sync(); return null; } };
+  const invalidate = () => { setCompiled(null); setPrepared(null); };
+  const edit = (operation: (project: Project, timestamp: Date) => Project) => { try { setError(null); workspace.editProject(operation); invalidate(); sync(); return true; } catch (cause) { setError(friendlyError(cause)); sync(); return false; } };
+  const workspaceAction = <T,>(operation: () => T): T | null => { try { setError(null); const result = operation(); invalidate(); sync(); return result; } catch (cause) { setError(friendlyError(cause)); sync(); return null; } };
   useEffect(() => { void run(() => workspace.initialize()); }, [workspace]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => playback.subscribe(setTransport), [playback]);
-  useEffect(() => setCompiled(null), [snapshot.project?.id]);
+  useEffect(() => { setCompiled(null); setPrepared(null); }, [snapshot.project?.id]);
   const audioReference = snapshot.project?.audio?.reference;
   useEffect(() => {
     let current = true; const referenceKey = audioReference ? JSON.stringify(audioReference) : null; const alreadyLoaded = referenceKey !== null && preloadedAudio.current === referenceKey; preloadedAudio.current = null; if (!alreadyLoaded) playback.unload(); setWaveform({ status: audioReference ? 'loading' : 'idle', data: null, error: null });
@@ -73,18 +78,19 @@ export function AppStateProvider({ children, workspace: supplied, playback: supp
     }).catch(cause => { if (current) { setAudioAvailability('error'); setError(cause instanceof Error ? cause.message : String(cause)); } });
     return () => { current = false; };
   }, [snapshot.project?.id, audioReference, media, playback, waveformCache, waveformExtractor]); // intentionally follows persisted media identity
-  const chooseAudio = async () => { const path = await media.choose(); if (!path) return; setAudioAvailability('loading'); const resolved = await media.resolve({ type: 'external-uri', uri: path }); if (resolved.status !== 'available') throw new Error('The selected audio file cannot be read.'); const metadata = await playback.load(resolved.url); preloadedAudio.current = JSON.stringify({ type: 'external-uri', uri: path }); workspace.editProject((project, at) => setProjectAudio(project, { displayName: media.displayName(path), uri: path, durationMs: metadata.durationMs, mediaType: metadata.mediaType ?? media.mediaType(path) }, createStableId, at)); setAudioAvailability('ready'); setCompiled(null); sync(); };
+  const chooseAudio = async () => { const path = await media.choose(); if (!path) return; setAudioAvailability('loading'); const resolved = await media.resolve({ type: 'external-uri', uri: path }); if (resolved.status !== 'available') throw new Error('The selected audio file cannot be read.'); const metadata = await playback.load(resolved.url); preloadedAudio.current = JSON.stringify({ type: 'external-uri', uri: path }); workspace.editProject((project, at) => setProjectAudio(project, { displayName: media.displayName(path), uri: path, durationMs: metadata.durationMs, mediaType: metadata.mediaType ?? media.mediaType(path) }, createStableId, at)); setAudioAvailability('ready'); setCompiled(null); setPrepared(null); sync(); };
   const value: AppStateValue = { ...snapshot, section, error, clearError: () => setError(null), navigate: (next) => { if (next === 'Projects' && section === 'Editor') void run(async () => { if (await workspace.close(confirmUnsaved)) setSection(next); }); else setSection(next); },
     createProject: async name => run(async () => { const project = await creator.createProject(name); if (await workspace.newProject(() => project, confirmUnsaved)) setSection('Editor'); }),
     openProject: async () => run(async () => { if (await workspace.chooseAndOpen(confirmUnsaved)) setSection('Editor'); }),
     openRecent: async path => run(async () => { if (await workspace.openRecent(path, confirmUnsaved)) setSection('Editor'); }), removeRecent: path => run(() => workspace.removeRecent(path)),
-    save: () => run(() => workspace.save()), saveAs: () => run(() => workspace.saveAs()), updateProject: project => { workspace.replaceProject(project); setCompiled(null); sync(); }, undo: () => { playback.pause(); return workspaceAction(() => workspace.undo()) ?? false; }, redo: () => { playback.pause(); return workspaceAction(() => workspace.redo()) ?? false; },
-    compilation: { result: compiled, compile: () => { if (!snapshot.project) return false; try { setError(null); setCompiled(compileProject(snapshot.project)); return true; } catch (cause) { setCompiled(null); setError(compilerFriendlyError(cause)); return false; } }, clear: () => setCompiled(null), serialized: () => compiled ? serializeCompiledShow(compiled) : null },
+    save: () => run(() => workspace.save()), saveAs: () => run(() => workspace.saveAs()), updateProject: project => { workspace.replaceProject(project); invalidate(); sync(); }, undo: () => { playback.pause(); return workspaceAction(() => workspace.undo()) ?? false; }, redo: () => { playback.pause(); return workspaceAction(() => workspace.redo()) ?? false; },
+    compilation: { result: compiled, compile: () => { if (!snapshot.project) return false; try { setError(null); setPrepared(null); setCompiled(compileProject(snapshot.project)); return true; } catch (cause) { setCompiled(null); setPrepared(null); setError(compilerFriendlyError(cause)); return false; } }, clear: () => { setCompiled(null); setPrepared(null); }, serialized: () => compiled ? serializeCompiledShow(compiled) : null },
+    preparation: { result: prepared, prepare: () => { if (!snapshot.project || !compiled) return false; try { setError(null); setPrepared(prepareCompiledShow(snapshot.project, compiled)); return true; } catch (cause) { setPrepared(null); setError(preparationFriendlyError(cause)); return false; } }, serialized: () => prepared ? serializePreparedShow(prepared) : null },
     audio: { availability: audioAvailability, transport, waveform, importAudio: () => run(chooseAudio), locateAudio: () => run(chooseAudio), removeAudio: () => { playback.unload(); edit((project, at) => removeProjectAudio(project, at)); setAudioAvailability('none'); setWaveform({ status: 'idle', data: null, error: null }); }, play: () => run(() => playback.play()), pause: () => playback.pause(), seek: value => playback.seek(timelineTime(value)) },
     topology: {
       addCostume: name => edit((project, at) => addCostume(project, name, createStableId, at)), renameCostume: (id, name) => edit((project, at) => renameCostume(project, id, name, at)), deleteCostume: id => edit((project, at) => removeCostume(project, id, at)), moveCostume: (from, to) => edit((project, at) => reorderCostumes(project, from, to, at)),
       renameMaster: (id, name) => edit((project, at) => renameMaster(project, id, name, at)), addPico: (id, name) => edit((project, at) => addSlave(project, id, { displayName: name }, createStableId, at)), renamePico: (id, name) => edit((project, at) => renameSlave(project, id, name, at)), setPicoAddress: (id, address) => edit((project, at) => changeSlaveLogicalAddress(project, id, address, at)), deletePico: id => edit((project, at) => removeSlave(project, id, at)), movePico: (id, from, to) => edit((project, at) => reorderSlaves(project, id, from, to, at)),
-      addChannel: (id, name, output) => edit((project, at) => addChannel(project, id, { displayName: name, hardwareOutputIdentifier: output }, createStableId, at)), renameChannel: (id, name) => edit((project, at) => renameChannel(project, id, name, at)), setChannelOutput: (id, output) => edit((project, at) => changeChannelHardwareOutputIdentifier(project, id, output, at)), deleteChannel: id => edit((project, at) => removeChannel(project, id, at)), moveChannel: (id, from, to) => edit((project, at) => reorderChannels(project, id, from, to, at)),
+      addChannel: (id, name, output) => edit((project, at) => addChannel(project, id, { displayName: name, hardwareOutputIdentifier: output }, createStableId, at)), renameChannel: (id, name) => edit((project, at) => renameChannel(project, id, name, at)), setChannelOutput: (id, output) => edit((project, at) => changeChannelHardwareOutputIdentifier(project, id, output, at)), setChannelProtocolOutputId: (id, outputId) => edit((project, at) => setChannelProtocolOutputId(project, id, outputId, at)), autoAssignOutputIds: id => edit((project, at) => autoAssignChannelProtocolOutputIds(project, id, at)), deleteChannel: id => edit((project, at) => removeChannel(project, id, at)), moveChannel: (id, from, to) => edit((project, at) => reorderChannels(project, id, from, to, at)),
     },
     score: {
       add: input => workspaceAction(() => { workspace.addLightInterval(input); return true; }) ?? false,
@@ -125,4 +131,8 @@ function compilerFriendlyError(cause: unknown) {
     case 'duplicate-target': return `Two channels resolve to the same Pico address and hardware output. Each runtime target must be unique.`;
     default: return cause.message;
   }
+}
+function preparationFriendlyError(cause: unknown) {
+  if (!(cause instanceof PreparationError)) return friendlyError(cause);
+  return cause.message;
 }

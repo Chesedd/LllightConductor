@@ -43,6 +43,7 @@ export function validateProject(project: Project): ValidationIssue[] {
         addresses.add(slave.logicalAddress);
       }
       const outputs = new Set<string>();
+      const protocolOutputs = new Set<number>();
       slave.channels.forEach((channel, channelIndex) => {
         const channelPath = `${slavePath}.channels[${channelIndex}]`;
         addId(channel.id, `${channelPath}.id`);
@@ -50,6 +51,11 @@ export function validateProject(project: Project): ValidationIssue[] {
         if (!channel.hardwareOutputIdentifier.trim()) issues.push({ path: `${channelPath}.hardwareOutputIdentifier`, message: 'Hardware output identifier is required' });
         else if (outputs.has(channel.hardwareOutputIdentifier)) issues.push({ path: `${channelPath}.hardwareOutputIdentifier`, message: 'Hardware output identifier must be unique within the slave' });
         outputs.add(channel.hardwareOutputIdentifier);
+        if (channel.protocolOutputId !== undefined) {
+          if (!Number.isInteger(channel.protocolOutputId) || channel.protocolOutputId < 0 || channel.protocolOutputId > 255) issues.push({ path: `${channelPath}.protocolOutputId`, message: 'Pico Output ID must be an integer from 0 to 255' });
+          else if (protocolOutputs.has(channel.protocolOutputId)) issues.push({ path: `${channelPath}.protocolOutputId`, message: 'Pico Output ID must be unique within the slave' });
+          protocolOutputs.add(channel.protocolOutputId);
+        }
       });
     });
   });

@@ -2,7 +2,7 @@
 
 ## Project history
 
-`ProjectWorkspace` is the application boundary for all persisted edits. It owns a bounded, session-only history of immutable `Project` snapshots: `past`, `current`, and `future`. The default capacity is 100 undo states; when full, the oldest states are discarded. History is deliberately absent from Project File V2.
+`ProjectWorkspace` is the application boundary for all persisted edits. It owns a bounded, session-only history of immutable `Project` snapshots: `past`, `current`, and `future`. The default capacity is 100 undo states; when full, the oldest states are discarded. History is deliberately absent from Project File V3.
 
 One successful domain transaction creates one entry. Pointer previews, selection, playback, playhead, waveform state, zoom, and scrolling never enter history. A rejected operation leaves current state, dirty state, and the redo branch unchanged. A successful edit after undo clears the redo branch. New and Open reset history to the new baseline; Save and Save As do not.
 

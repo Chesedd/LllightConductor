@@ -50,6 +50,17 @@ export function addChannel(project: Project, slaveId: ControllerId, input: { dis
 }
 export function renameChannel(project: Project, id: ChannelId, displayName: string, timestamp: Timestamp): Project { return mapChannels(project, id, channel => ({ ...channel, displayName: named(displayName, 'Channel display name') }), timestamp); }
 export function changeChannelHardwareOutputIdentifier(project: Project, id: ChannelId, hardwareOutputIdentifier: string, timestamp: Timestamp): Project { return mapChannels(project, id, channel => ({ ...channel, hardwareOutputIdentifier: named(hardwareOutputIdentifier, 'Hardware output identifier') }), timestamp); }
+export function setChannelProtocolOutputId(project: Project, id: ChannelId, protocolOutputId: number | undefined, timestamp: Timestamp): Project {
+  if (protocolOutputId !== undefined && (!Number.isInteger(protocolOutputId) || protocolOutputId < 0 || protocolOutputId > 255)) throw new Error('Pico Output ID must be an integer from 0 to 255');
+  return mapChannels(project, id, channel => { const result = { ...channel }; if (protocolOutputId === undefined) delete result.protocolOutputId; else result.protocolOutputId = protocolOutputId; return result; }, timestamp);
+}
+/** Replaces every mapping on one Pico with its zero-based topology position, atomically. */
+export function autoAssignChannelProtocolOutputIds(project: Project, slaveId: ControllerId, timestamp: Timestamp): Project {
+  const slave = project.costumes.flatMap(costume => costume.master.slaves).find(value => value.id === slaveId);
+  if (!slave) throw new Error(`Pico '${slaveId}' does not exist`);
+  if (slave.channels.length > 256) throw new Error('Auto Assign Output IDs supports at most 256 channels per Pico');
+  return mapSlaves(project, slaveId, value => ({ ...value, channels: value.channels.map((channel, index) => ({ ...channel, protocolOutputId: index })) }), timestamp);
+}
 export function removeChannel(project: Project, id: ChannelId, timestamp: Timestamp): Project { return finish({ ...project, costumes: project.costumes.map(costume => ({ ...costume, master: { ...costume.master, slaves: costume.master.slaves.map(slave => ({ ...slave, channels: slave.channels.filter(channel => channel.id !== id) })) } })), score: { ...project.score, events: project.score.events.filter(event => event.channelId !== id) } }, timestamp); }
 export function reorderChannels(project: Project, slaveId: ControllerId, from: number, to: number, timestamp: Timestamp): Project { return mapSlaves(project, slaveId, slave => ({ ...slave, channels: move(slave.channels, from, to) }), timestamp); }
 

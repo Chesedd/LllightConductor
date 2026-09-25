@@ -7,7 +7,7 @@ import { createLightInterval, moveLightInterval, removeScoreEvent, resizeLightIn
 
 const at = '2026-09-25T00:00:00.000Z';
 const id = (value: string) => () => value;
-const base = (): Project => ({ schemaVersion: 2, id: 'p', name: 'Show', createdAt: at, updatedAt: at, audio: null, costumes: [
+const base = (): Project => ({ schemaVersion: 3, id: 'p', name: 'Show', createdAt: at, updatedAt: at, audio: null, costumes: [
   { id: 'costume-a', name: 'A', master: { id: 'master-a', displayName: 'M', type: 'esp32', slaves: [{ id: 'pico-a', displayName: 'P', type: 'raspberry-pi-pico', channels: [{ id: 'a', displayName: 'A', type: 'el-wire', hardwareOutputIdentifier: '0' }, { id: 'b', displayName: 'B', type: 'digital-output', hardwareOutputIdentifier: '1' }, { id: 'led', displayName: 'LED', type: 'addressable-led', hardwareOutputIdentifier: '2' }] }] } },
   { id: 'costume-b', name: 'B', master: { id: 'master-b', displayName: 'M2', type: 'esp32', slaves: [{ id: 'pico-b', displayName: 'P2', type: 'raspberry-pi-pico', channels: [{ id: 'c', displayName: 'C', type: 'el-wire', hardwareOutputIdentifier: '0' }] }] } },
 ], score: { version: 1, events: [] }, deviceBindings: [] });

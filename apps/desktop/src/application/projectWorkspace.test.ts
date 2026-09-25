@@ -6,7 +6,7 @@ import { InMemoryRecentProjectsRepository } from '../persistence/recentProjectsR
 import { ProjectWorkspace, type UnsavedDecision } from './projectWorkspace';
 import { removeProjectAudio, setProjectAudio } from '../domain/audioOperations';
 
-const project = (name = 'Show'): Project => ({ schemaVersion: 2, id: 'project', name, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', audio: null, costumes: [], score: { version: 1, events: [] }, deviceBindings: [] });
+const project = (name = 'Show'): Project => ({ schemaVersion: 3, id: 'project', name, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', audio: null, costumes: [], score: { version: 1, events: [] }, deviceBindings: [] });
 class FakeGateway implements ProjectFileGateway { openPath: string | null = null; savePath: string | null = null; files = new Map<string, string>(); writes: string[] = []; async chooseOpenPath() { return this.openPath; } async chooseSavePath() { return this.savePath; } async readText(path: string) { const value = this.files.get(path); if (!value) throw new Error('File not found'); return value; } async atomicWriteText(path: string, contents: string) { this.files.set(path, contents); this.writes.push(path); } }
 const setup = () => { const gateway = new FakeGateway(); const recent = new InMemoryRecentProjectsRepository(); const workspace = new ProjectWorkspace(new ProjectFileService(gateway), recent, () => new Date('2026-03-01T00:00:00Z')); return { gateway, recent, workspace }; };
 const decision = (value: UnsavedDecision) => async () => value;

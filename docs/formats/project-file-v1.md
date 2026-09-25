@@ -34,6 +34,6 @@ The current page, selection, audio playback status, playhead/current playback po
 
 ## Validation and compatibility
 
-Readers parse untrusted JSON, inspect `schemaVersion`, validate every v1 field, map the persistence DTO to the domain aggregate, and then enforce domain invariants. Files with missing or malformed versions are rejected. A version newer than the reader supports is rejected rather than interpreted as v1. Current readers retain this legacy contract, validate it, and explicitly migrate it to the current domain with an empty Score v1. They do not rewrite on Open; the next Save writes file V2. See [project-file-v2.md](project-file-v2.md).
+Readers parse untrusted JSON, inspect `schemaVersion`, validate every v1 field, map the persistence DTO to the domain aggregate, and then enforce domain invariants. Files with missing or malformed versions are rejected. A version newer than the reader supports is rejected rather than interpreted as v1. Current readers retain this legacy contract, validate it, and explicitly migrate it to the current domain with an empty Score v1 and unset protocol mappings. They do not rewrite on Open; the next Save writes file V3. See [project-file-v3.md](project-file-v3.md).
 
 Saves write and flush a temporary sibling file before replacing the target. This prevents a partially written JSON document from overwriting the prior project; Windows additionally uses a rollback backup because its standard rename does not replace an existing file.
