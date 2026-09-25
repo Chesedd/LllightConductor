@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { createStableId, type ChannelId, type ControllerId, type CostumeId, type Project } from '../../domain/project';
+import { createStableId, type ChannelId, type ControllerId, type CostumeId, type EntityId, type Project } from '../../domain/project';
 import { addChannel, addCostume, addSlave, changeChannelHardwareOutputIdentifier, changeSlaveLogicalAddress, removeChannel, removeCostume, removeSlave, renameChannel, renameCostume, renameMaster, renameSlave, reorderChannels, reorderCostumes, reorderSlaves } from '../../domain/projectOperations';
 import { ProjectService } from '../../application/projectService';
 import { ProjectWorkspace, type UnsavedDecision, type WorkspaceSnapshot } from '../../application/projectWorkspace';
@@ -29,6 +29,7 @@ interface AppStateValue extends WorkspaceSnapshot {
     renameMaster: (id: ControllerId, name: string) => boolean; addPico: (masterId: ControllerId, name: string) => boolean; renamePico: (id: ControllerId, name: string) => boolean; setPicoAddress: (id: ControllerId, address: number) => boolean; deletePico: (id: ControllerId) => boolean; movePico: (masterId: ControllerId, from: number, to: number) => boolean;
     addChannel: (picoId: ControllerId, name: string, output: string) => boolean; renameChannel: (id: ChannelId, name: string) => boolean; setChannelOutput: (id: ChannelId, output: string) => boolean; deleteChannel: (id: ChannelId) => boolean; moveChannel: (picoId: ControllerId, from: number, to: number) => boolean;
   };
+  score: { add: (input: { channelId: ChannelId; startMs: TimelineTimeMs; endMs: TimelineTimeMs }) => boolean; move: (id: EntityId, startMs: TimelineTimeMs) => boolean; resize: (id: EntityId, input: { startMs?: TimelineTimeMs; endMs?: TimelineTimeMs }) => boolean; remove: (id: EntityId) => boolean };
 }
 const AppStateContext = createContext<AppStateValue | null>(null);
 
@@ -77,6 +78,7 @@ export function AppStateProvider({ children, workspace: supplied, playback: supp
       renameMaster: (id, name) => edit((project, at) => renameMaster(project, id, name, at)), addPico: (id, name) => edit((project, at) => addSlave(project, id, { displayName: name }, createStableId, at)), renamePico: (id, name) => edit((project, at) => renameSlave(project, id, name, at)), setPicoAddress: (id, address) => edit((project, at) => changeSlaveLogicalAddress(project, id, address, at)), deletePico: id => edit((project, at) => removeSlave(project, id, at)), movePico: (id, from, to) => edit((project, at) => reorderSlaves(project, id, from, to, at)),
       addChannel: (id, name, output) => edit((project, at) => addChannel(project, id, { displayName: name, hardwareOutputIdentifier: output }, createStableId, at)), renameChannel: (id, name) => edit((project, at) => renameChannel(project, id, name, at)), setChannelOutput: (id, output) => edit((project, at) => changeChannelHardwareOutputIdentifier(project, id, output, at)), deleteChannel: id => edit((project, at) => removeChannel(project, id, at)), moveChannel: (id, from, to) => edit((project, at) => reorderChannels(project, id, from, to, at)),
     },
+    score: { add: input => edit(() => { workspace.addLightInterval(input); return workspace.snapshot().project!; }), move: (id, startMs) => edit(() => { workspace.moveLightInterval(id, startMs); return workspace.snapshot().project!; }), resize: (id, input) => edit(() => { workspace.resizeLightInterval(id, input); return workspace.snapshot().project!; }), remove: id => edit(() => { workspace.removeScoreEvent(id); return workspace.snapshot().project!; }) },
   };
   return <AppStateContext.Provider value={value}>{children}{confirming && <UnsavedDialog onChoose={decide}/>} {error && <ErrorDialog message={error} onClose={() => setError(null)}/>}</AppStateContext.Provider>;
 }
@@ -91,5 +93,8 @@ function friendlyError(cause: unknown) {
   if (message.includes('Logical address must be unique')) return 'That logical address is already used by another Pico in this costume.';
   if (message.includes('Logical address must be a non-negative integer')) return 'Logical address must be a non-negative whole number.';
   if (message.includes('Hardware output identifier must be unique')) return 'That hardware output identifier is already used by another channel on this Pico.';
+  if (message.includes('overlaps another event')) return 'This channel already has a light interval at that time.';
+  if (message.includes('positive duration')) return 'The interval must end after it starts.';
+  if (message.includes('audio duration')) return 'The interval cannot extend past the end of the audio track.';
   return message.replace(/^.*?: /, '');
 }
