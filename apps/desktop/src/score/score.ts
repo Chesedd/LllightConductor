@@ -1,5 +1,10 @@
-export type ScoreEventId = string;
-export interface ScoreEvent { id: ScoreEventId; channelId: string; startsAtMs: number; durationMs: number; value: number }
-export interface Score { durationMs: number; events: ScoreEvent[] }
+/**
+ * Versioned placeholder only. The timeline/event contract is intentionally deferred;
+ * consumers must not infer a final event model from this shape.
+ */
+export interface ProvisionalScore {
+  format: 'provisional';
+  version: 1;
+}
 
-export const emptyScore = (): Score => ({ durationMs: 0, events: [] });
+export const emptyScore = (): ProvisionalScore => ({ format: 'provisional', version: 1 });
