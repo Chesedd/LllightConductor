@@ -29,6 +29,19 @@ fn choose_project_save_path(suggested_name: String) -> Option<String> {
 }
 
 #[tauri::command]
+fn choose_audio_file() -> Option<String> {
+    rfd::FileDialog::new()
+        .add_filter("Supported audio", &["mp3", "wav"])
+        .pick_file()
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn audio_file_exists(path: String) -> bool {
+    Path::new(&path).is_file()
+}
+
+#[tauri::command]
 fn read_project_file(path: String) -> Result<String, String> {
     fs::read_to_string(path).map_err(|error| error.to_string())
 }
@@ -111,6 +124,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             choose_project_to_open,
             choose_project_save_path,
+            choose_audio_file,
+            audio_file_exists,
             read_project_file,
             atomic_write_project_file
         ])

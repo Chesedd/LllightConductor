@@ -4,6 +4,6 @@
   "version": "0.1.0",
   "identifier": "studio.lllight.conductor",
   "build": { "beforeDevCommand": "npm run dev", "devUrl": "http://localhost:1420", "beforeBuildCommand": "npm run build", "frontendDist": "../dist" },
-  "app": { "windows": [{ "title": "Lllight Conductor", "width": 1280, "height": 800, "minWidth": 900, "minHeight": 620, "decorations": true }], "security": { "csp": null } },
+  "app": { "windows": [{ "title": "Lllight Conductor", "width": 1280, "height": 800, "minWidth": 900, "minHeight": 620, "decorations": true }], "security": { "csp": null, "assetProtocol": { "enable": true, "scope": ["**"] } } },
   "bundle": { "active": true, "targets": "all" }
 }

@@ -7,7 +7,7 @@ Lllight Conductor MVP projects use one human-readable JSON file with the `.light
 The root is a JSON object whose required `schemaVersion` is `1`. It contains:
 
 - `id`, `name`, `createdAt`, and `updatedAt` (timestamps are canonical ISO 8601 strings);
-- nullable `audio`, containing stable metadata and either a `project-asset` name or an `external-uri` reference; audio bytes are never copied into the project;
+- nullable `audio`, containing a stable ID, display filename, integer `durationMs`, optional media type, and either a `project-asset` name or an `external-uri` reference; audio bytes are never copied into the project. The current desktop importer writes the picker-returned native path as the opaque `external-uri` value and resolves it only at the media boundary;
 - `costumes`; each costume owns its logical master/slave/channel topology and stable entity IDs;
 - `deviceBindings`, durable links from logical controller IDs to physical device identities;
 - `provisionalScore`, currently `{ "format": "provisional", "version": 1 }`.
@@ -30,7 +30,7 @@ The root is a JSON object whose required `schemaVersion` is `1`. It contains:
 
 ## Deliberately excluded state
 
-The current page, selection, playhead, zoom, dialogs, errors, online/offline status, serial ports, last-seen data, dirty flag, and the `.lightshow` file's absolute path are application-session state and are not persisted in the aggregate. Recent-project path/name/time metadata is stored separately in application-local storage.
+The current page, selection, audio playback status, playhead/current playback position, volume/decoder state, zoom, dialogs, errors, online/offline status, serial ports, last-seen data, dirty flag, and the `.lightshow` file's absolute path are application-session state and are not persisted in the aggregate. Recent-project path/name/time metadata is stored separately in application-local storage.
 
 ## Validation and compatibility
 

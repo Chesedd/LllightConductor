@@ -19,7 +19,12 @@ export function validateProject(project: Project): ValidationIssue[] {
   if (!isIsoTimestamp(project.createdAt)) issues.push({ path: 'createdAt', message: 'Timestamp must be a valid ISO 8601 date' });
   if (!isIsoTimestamp(project.updatedAt)) issues.push({ path: 'updatedAt', message: 'Timestamp must be a valid ISO 8601 date' });
   addId(project.id, 'id');
-  if (project.audio) addId(project.audio.id, 'audio.id');
+  if (project.audio) {
+    addId(project.audio.id, 'audio.id');
+    required(project.audio.displayName, 'audio.displayName', issues);
+    if (project.audio.reference.type === 'external-uri' && !project.audio.reference.uri.trim()) issues.push({ path: 'audio.reference.uri', message: 'External audio reference is required' });
+    if (project.audio.durationMs !== undefined && (!Number.isSafeInteger(project.audio.durationMs) || project.audio.durationMs < 0)) issues.push({ path: 'audio.durationMs', message: 'Duration must be non-negative integer milliseconds' });
+  }
   project.costumes.forEach((costume, costumeIndex) => {
     const costumePath = `costumes[${costumeIndex}]`;
     addId(costume.id, `${costumePath}.id`);
