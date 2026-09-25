@@ -23,8 +23,8 @@ apps/desktop/              React UI и Tauri host
     score/                минимальная модель партитуры/timeline
     ui/                    shell, навигация и экраны
   src-tauri/               минимальный нативный Tauri host
-firmware/esp32-master/     место для будущей прошивки (не реализована)
-firmware/pico-slave/       место для будущей прошивки (не реализована)
+firmware/esp32-master/     ESP32 scheduler, Pico sessions и portable Desktop Protocol v1
+firmware/pico-slave/       Pico Protocol v1 slave firmware
 docs/architecture/         архитектурные решения
 docs/protocols/            место для будущих спецификаций протоколов
 docs/formats/              место для будущих форматов
@@ -55,5 +55,8 @@ npm run build
 
 ## Текущий объём
 
-Есть оболочка с разделами Projects, Editor, Devices и Settings, стартовый экран проектов, типизированная модель нового проекта и in-memory repository. Нет загрузки аудио, waveform/timeline editor, постоянного сохранения, hardware I/O, протоколов, компилятора партитуры и прошивок.
-
+Помимо desktop-редактора, репозиторий содержит firmware обоих контроллеров. ESP32
+имеет host-testable Desktop Protocol v1 codec/parser, RAM staging, проверку SHA-256,
+декодер Prepared Master Binary v1, activation/control/status и интеграцию с
+существующим Pico scheduler. Настоящий Desktop Serial transport, COM discovery и UI
+подключения/загрузки пока намеренно отсутствуют.

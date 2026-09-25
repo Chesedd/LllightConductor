@@ -3,7 +3,9 @@
 ESP-IDF Master prototype for one point-to-point Pico link. It stores a static
 prepared show, owns the monotonic show clock, establishes Protocol v1, explicitly
 resets outputs, dispatches batched updates, and tracks replies asynchronously.
-Desktop transfer, networking, and multi-Master synchronization are out of scope.
+The portable C++17 core now accepts Desktop Protocol v1 through an in-memory-testable
+`DesktopTransport` boundary. A production desktop serial adapter, networking, and
+multi-Master synchronization remain out of scope.
 
 ## Requirements and build
 
@@ -61,7 +63,9 @@ transitions; Protocol bytes never go to the console.
 ## Known limitations
 
 - one physical Pico despite the multi-address portable core;
-- no desktop upload/control, persistence, reconnect-in-show, or multi-ESP sync;
+- no real desktop serial adapter, COM discovery/UI, flash persistence, or multi-ESP sync;
+- active and staged artifacts are volatile RAM; reboot loses both;
+- production `DeviceIdentityProvider` is not wired yet (host tests use a fixed ID);
 - no communication-loss watchdog, so a broken wire cannot guarantee physical OFF;
 - compile-time auto-start is the first prototype's only local demo trigger;
 - measured timing depends on target/load and needs hardware characterization.

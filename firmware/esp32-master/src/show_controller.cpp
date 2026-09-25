@@ -1,6 +1,6 @@
 #include "master/show_controller.hpp"
 namespace master {
-bool ShowController::load(const PreparedMasterShow&s){if(state_!=ShowState::Idle||!validate_show(s)){state_=ShowState::Fault;return false;}show_=&s;return true;}
+bool ShowController::load(const PreparedMasterShow&s){if((state_!=ShowState::Idle&&state_!=ShowState::Ready)||!validate_show(s)){state_=ShowState::Fault;return false;}show_=&s;return true;}
 bool ShowController::prepare(){if(state_!=ShowState::Idle||!show_)return false;for(size_t i=0;i<show_->frame_count;i++)for(size_t b=0;b<show_->frames[i].batch_count;b++)if(!sessions_.add_slave(show_->frames[i].batches[b].slave_address)){fatal_fault();return false;}state_=ShowState::PreparingHello;for(uint16_t a=0;a<255;a++)if(sessions_.find(uint8_t(a))&&!sessions_.start_hello(uint8_t(a))){fatal_fault();return false;}return true;}
 bool ShowController::start(){if(state_!=ShowState::Ready||!scheduler_slot_)return false;scheduler_slot_->start(*show_);state_=ShowState::Running;return true;}
 bool ShowController::dispatch(const PreparedFrame&f){for(size_t b=0;b<f.batch_count;b++)if(!sessions_.send_updates(f.batches[b]))return false;return true;}
