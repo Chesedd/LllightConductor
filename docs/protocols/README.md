@@ -1,3 +1,3 @@
 # Protocols
 
-Reserved for future, versioned desktop ↔ ESP32 and ESP32 ↔ Pico protocol specifications. No protocol is defined at this stage.
+- [ESP32 Master ↔ Raspberry Pi Pico Protocol v1](./esp32-pico-protocol-v1.md) — stable binary UART framing and message semantics, with a host reference codec and conformance vectors.
