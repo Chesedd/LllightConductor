@@ -12,6 +12,10 @@ export class ProjectWorkspace {
   async initialize() { this.state = { ...this.state, recentProjects: await this.recent.list() }; }
   setNewProject(project: Project) { this.state = { ...this.state, project, filePath: null, dirty: true }; }
   replaceProject(project: Project) { this.state = { ...this.state, project, dirty: true }; }
+  editProject(operation: (project: Project, timestamp: Date) => Project) {
+    if (!this.state.project) throw new Error('No project is open');
+    this.replaceProject(operation(this.state.project, this.now()));
+  }
   async save(): Promise<boolean> { if (!this.state.project) return false; return this.state.filePath ? this.saveAt(this.state.filePath) : this.saveAs(); }
   async saveAs(): Promise<boolean> { if (!this.state.project) return false; const path = await this.files.chooseSavePath(this.state.project); return path ? this.saveAt(path) : false; }
   private async saveAt(path: string) { const project = this.state.project!; await this.files.save(project, path); this.state = { ...this.state, filePath: path, dirty: false }; await this.touchRecent(path, project.name); return true; }
