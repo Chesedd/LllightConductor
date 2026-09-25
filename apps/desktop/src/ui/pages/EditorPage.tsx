@@ -1,10 +1,11 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { ChevronDown, ChevronRight, Clock3, FolderKanban, Minus, Music, Pause, Play, Plus, Save, Upload } from 'lucide-react';
+import { ChevronDown, ChevronRight, FolderKanban, Music, Pause, Play, Save, Upload } from 'lucide-react';
 import { useAppState } from '../state/AppState';
 import { EmptyState } from '../components/EmptyState';
 import { ConfirmationDialog } from '../components/ConfirmationDialog';
 import type { ChannelId, ControllerId, CostumeId, Project } from '../../domain/project';
 import { formatTimelineTime, timelineTime } from '../../domain/timelineTime';
+import { TimelineSurface } from '../components/TimelineSurface';
 
 type Selection = { kind: 'costume'; id: CostumeId } | { kind: 'master' | 'pico'; id: ControllerId } | { kind: 'channel'; id: ChannelId };
 type CreateRequest = { kind: 'costume' } | { kind: 'pico'; parentId: ControllerId } | { kind: 'channel'; parentId: ControllerId };
@@ -30,7 +31,7 @@ export function EditorPage() {
     <EditorToolbar />
     <div className="editor-body">
       <ProjectTree project={project} selection={selection} onSelect={setSelection} onCreate={setCreateRequest} onDelete={(item, name) => setDeleteRequest({ selection: item, name })} />
-      <div className="timeline-column"><AudioPanel onRemove={() => setRemoveAudioRequested(true)}/><div className="timeline-placeholder"><div className="timeline-ruler" aria-hidden="true">00:00 <span>00:10</span><span>00:20</span><span>00:30</span></div><Clock3 size={34}/><h2>Timeline will appear here</h2><p>Waveform and lighting tracks will be added in a future stage.</p></div></div>
+      <div className="timeline-column"><AudioPanel onRemove={() => setRemoveAudioRequested(true)}/><TimelineSurface projectId={project.id}/></div>
       <Inspector project={project} selection={selection} />
     </div>
     {createRequest && <CreateDialog request={createRequest} costumeNumber={project.costumes.length + 1} onClose={() => setCreateRequest(null)} />}
@@ -45,7 +46,6 @@ export function EditorToolbar() {
   return <div className="editor-toolbar" aria-label="Project toolbar">
     <button className="transport" disabled={!canPlay} aria-label="Play" onClick={() => void audio.play()}><Play size={16}/></button><button className="transport" disabled={audio.transport.status !== 'playing'} aria-label="Pause" onClick={audio.pause}><Pause size={16}/></button><output className="time-display" aria-label="Playback time">{formatTimelineTime(audio.transport.currentTimeMs)} / {formatTimelineTime(audio.transport.durationMs)}</output>
     <div className="project-session"><strong>{project?.name}{dirty ? ' *' : ''}</strong><span title={filePath ?? undefined}>{filePath ?? 'Unsaved project'}</span></div><div className="toolbar-spacer"/>
-    <div className="zoom"><button disabled aria-label="Zoom out"><Minus size={14}/></button><span>100%</span><button disabled aria-label="Zoom in"><Plus size={14}/></button></div>
     <button className="button secondary" onClick={() => void save()}><Save size={15}/> Save</button><button className="button secondary" onClick={() => void saveAs()}>Save As</button><button className="button secondary" disabled><Upload size={15}/> Upload</button>
   </div>;
 }
