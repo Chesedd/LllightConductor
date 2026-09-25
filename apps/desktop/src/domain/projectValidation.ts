@@ -1,4 +1,5 @@
 import type { Project } from './project';
+import { CURRENT_SCORE_VERSION } from '../score/score';
 
 export interface ValidationIssue { path: string; message: string }
 
@@ -51,6 +52,25 @@ export function validateProject(project: Project): ValidationIssue[] {
         outputs.add(channel.hardwareOutputIdentifier);
       });
     });
+  });
+  const channels = new Map(project.costumes.flatMap(costume => costume.master.slaves).flatMap(slave => slave.channels).map(channel => [channel.id, channel]));
+  if (project.score.version !== CURRENT_SCORE_VERSION) issues.push({ path: 'score.version', message: `Unsupported score version: ${String(project.score.version)}` });
+  project.score.events.forEach((event, eventIndex) => {
+    const eventPath = `score.events[${eventIndex}]`;
+    addId(event.id, `${eventPath}.id`);
+    if (event.kind !== 'light-interval') {
+      issues.push({ path: `${eventPath}.kind`, message: `Unsupported score event kind: ${String((event as { kind?: unknown }).kind)}` });
+      return;
+    }
+    const channel = channels.get(event.channelId);
+    if (!channel) issues.push({ path: `${eventPath}.channelId`, message: 'Event must reference an existing output channel' });
+    else if (channel.type !== 'el-wire' && channel.type !== 'digital-output') issues.push({ path: `${eventPath}.channelId`, message: 'Channel type does not support light intervals' });
+    if (!Number.isSafeInteger(event.startMs) || event.startMs < 0) issues.push({ path: `${eventPath}.startMs`, message: 'Start must be non-negative integer milliseconds' });
+    if (!Number.isSafeInteger(event.endMs)) issues.push({ path: `${eventPath}.endMs`, message: 'End must be integer milliseconds' });
+    else if (event.endMs <= event.startMs) issues.push({ path: `${eventPath}.endMs`, message: 'End must be greater than start' });
+    if (project.audio?.durationMs !== undefined && event.endMs > project.audio.durationMs) issues.push({ path: `${eventPath}.endMs`, message: 'Event must not exceed audio duration' });
+    const conflictIndex = project.score.events.findIndex((other, index) => index < eventIndex && other.kind === 'light-interval' && other.channelId === event.channelId && event.startMs < other.endMs && other.startMs < event.endMs);
+    if (conflictIndex >= 0) issues.push({ path: eventPath, message: `Event overlaps score.events[${conflictIndex}] on the same channel` });
   });
   const controllerIds = new Set(project.costumes.flatMap(({ master }) => [master.id, ...master.slaves.map(({ id }) => id)]));
   project.deviceBindings.forEach((binding, index) => {

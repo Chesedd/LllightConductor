@@ -1,4 +1,6 @@
-import type { Project } from '../domain/project';
+import { createStableId, type ChannelId, type EntityId, type IdGenerator, type Project } from '../domain/project';
+import type { TimelineTimeMs } from '../domain/timelineTime';
+import { createLightInterval, moveLightInterval, removeScoreEvent, resizeLightInterval } from '../score/scoreOperations';
 import type { ProjectFileService } from '../persistence/projectFileService';
 import type { RecentProject, RecentProjectsRepository } from '../persistence/recentProjectsRepository';
 
@@ -7,7 +9,7 @@ export interface WorkspaceSnapshot { project: Project | null; filePath: string |
 
 export class ProjectWorkspace {
   private state: WorkspaceSnapshot = { project: null, filePath: null, dirty: false, recentProjects: [] };
-  constructor(private readonly files: ProjectFileService, private readonly recent: RecentProjectsRepository, private readonly now = () => new Date()) {}
+  constructor(private readonly files: ProjectFileService, private readonly recent: RecentProjectsRepository, private readonly now = () => new Date(), private readonly createId: IdGenerator = createStableId) {}
   snapshot(): WorkspaceSnapshot { return { ...this.state, recentProjects: [...this.state.recentProjects] }; }
   async initialize() { this.state = { ...this.state, recentProjects: await this.recent.list() }; }
   setNewProject(project: Project) { this.state = { ...this.state, project, filePath: null, dirty: true }; }
@@ -16,6 +18,10 @@ export class ProjectWorkspace {
     if (!this.state.project) throw new Error('No project is open');
     this.replaceProject(operation(this.state.project, this.now()));
   }
+  addLightInterval(input: { channelId: ChannelId; startMs: TimelineTimeMs; endMs: TimelineTimeMs }) { this.editProject((project, at) => createLightInterval(project, input, this.createId, at)); }
+  moveLightInterval(eventId: EntityId, startMs: TimelineTimeMs) { this.editProject((project, at) => moveLightInterval(project, eventId, startMs, at)); }
+  resizeLightInterval(eventId: EntityId, input: { startMs?: TimelineTimeMs; endMs?: TimelineTimeMs }) { this.editProject((project, at) => resizeLightInterval(project, eventId, input, at)); }
+  removeScoreEvent(eventId: EntityId) { this.editProject((project, at) => removeScoreEvent(project, eventId, at)); }
   async save(): Promise<boolean> { if (!this.state.project) return false; return this.state.filePath ? this.saveAt(this.state.filePath) : this.saveAs(); }
   async saveAs(): Promise<boolean> { if (!this.state.project) return false; const path = await this.files.chooseSavePath(this.state.project); return path ? this.saveAt(path) : false; }
   private async saveAt(path: string) { const project = this.state.project!; await this.files.save(project, path); this.state = { ...this.state, filePath: path, dirty: false }; await this.touchRecent(path, project.name); return true; }
