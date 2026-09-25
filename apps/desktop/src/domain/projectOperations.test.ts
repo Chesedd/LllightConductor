@@ -20,7 +20,7 @@ async function topology(): Promise<Project> {
 describe('project domain operations', () => {
   it('creates a valid versioned project', async () => {
     const project = await emptyProject();
-    expect(project).toMatchObject({ schemaVersion: 1, id: 'project', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' });
+    expect(project).toMatchObject({ schemaVersion: 2, id: 'project', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' });
     expect(validateProject(project)).toEqual([]);
   });
 

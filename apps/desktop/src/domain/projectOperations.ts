@@ -23,7 +23,8 @@ export function renameMaster(project: Project, id: ControllerId, displayName: st
 export function removeCostume(project: Project, id: CostumeId, timestamp: Timestamp): Project {
   const removed = project.costumes.find(value => value.id === id);
   const controllerIds = new Set(removed ? [removed.master.id, ...removed.master.slaves.map(slave => slave.id)] : []);
-  return finish({ ...project, costumes: project.costumes.filter(value => value.id !== id), deviceBindings: project.deviceBindings.filter(binding => !controllerIds.has(binding.logicalControllerId)) }, timestamp);
+  const channelIds = new Set(removed?.master.slaves.flatMap(slave => slave.channels.map(channel => channel.id)) ?? []);
+  return finish({ ...project, costumes: project.costumes.filter(value => value.id !== id), score: { ...project.score, events: project.score.events.filter(event => !channelIds.has(event.channelId)) }, deviceBindings: project.deviceBindings.filter(binding => !controllerIds.has(binding.logicalControllerId)) }, timestamp);
 }
 export function reorderCostumes(project: Project, from: number, to: number, timestamp: Timestamp): Project { return finish({ ...project, costumes: move(project.costumes, from, to) }, timestamp); }
 
@@ -38,7 +39,10 @@ export function addSlave(project: Project, masterId: ControllerId, input: { disp
 }
 export function renameSlave(project: Project, id: ControllerId, displayName: string, timestamp: Timestamp): Project { return mapSlaves(project, id, slave => ({ ...slave, displayName: named(displayName, 'Slave display name') }), timestamp); }
 export function changeSlaveLogicalAddress(project: Project, id: ControllerId, logicalAddress: number, timestamp: Timestamp): Project { return mapSlaves(project, id, slave => ({ ...slave, logicalAddress }), timestamp); }
-export function removeSlave(project: Project, id: ControllerId, timestamp: Timestamp): Project { return finish({ ...project, costumes: project.costumes.map(costume => ({ ...costume, master: { ...costume.master, slaves: costume.master.slaves.filter(slave => slave.id !== id) } })), deviceBindings: project.deviceBindings.filter(binding => binding.logicalControllerId !== id) }, timestamp); }
+export function removeSlave(project: Project, id: ControllerId, timestamp: Timestamp): Project {
+  const channelIds = new Set(project.costumes.flatMap(costume => costume.master.slaves).filter(slave => slave.id === id).flatMap(slave => slave.channels.map(channel => channel.id)));
+  return finish({ ...project, costumes: project.costumes.map(costume => ({ ...costume, master: { ...costume.master, slaves: costume.master.slaves.filter(slave => slave.id !== id) } })), score: { ...project.score, events: project.score.events.filter(event => !channelIds.has(event.channelId)) }, deviceBindings: project.deviceBindings.filter(binding => binding.logicalControllerId !== id) }, timestamp);
+}
 export function reorderSlaves(project: Project, masterId: ControllerId, from: number, to: number, timestamp: Timestamp): Project { return finish({ ...project, costumes: project.costumes.map(costume => costume.master.id === masterId ? { ...costume, master: { ...costume.master, slaves: move(costume.master.slaves, from, to) } } : costume) }, timestamp); }
 
 export function addChannel(project: Project, slaveId: ControllerId, input: { displayName: string; type?: OutputChannelType; hardwareOutputIdentifier: string }, createId: IdGenerator, timestamp: Timestamp): Project {
@@ -46,7 +50,7 @@ export function addChannel(project: Project, slaveId: ControllerId, input: { dis
 }
 export function renameChannel(project: Project, id: ChannelId, displayName: string, timestamp: Timestamp): Project { return mapChannels(project, id, channel => ({ ...channel, displayName: named(displayName, 'Channel display name') }), timestamp); }
 export function changeChannelHardwareOutputIdentifier(project: Project, id: ChannelId, hardwareOutputIdentifier: string, timestamp: Timestamp): Project { return mapChannels(project, id, channel => ({ ...channel, hardwareOutputIdentifier: named(hardwareOutputIdentifier, 'Hardware output identifier') }), timestamp); }
-export function removeChannel(project: Project, id: ChannelId, timestamp: Timestamp): Project { return finish({ ...project, costumes: project.costumes.map(costume => ({ ...costume, master: { ...costume.master, slaves: costume.master.slaves.map(slave => ({ ...slave, channels: slave.channels.filter(channel => channel.id !== id) })) } })) }, timestamp); }
+export function removeChannel(project: Project, id: ChannelId, timestamp: Timestamp): Project { return finish({ ...project, costumes: project.costumes.map(costume => ({ ...costume, master: { ...costume.master, slaves: costume.master.slaves.map(slave => ({ ...slave, channels: slave.channels.filter(channel => channel.id !== id) })) } })), score: { ...project.score, events: project.score.events.filter(event => event.channelId !== id) } }, timestamp); }
 export function reorderChannels(project: Project, slaveId: ControllerId, from: number, to: number, timestamp: Timestamp): Project { return mapSlaves(project, slaveId, slave => ({ ...slave, channels: move(slave.channels, from, to) }), timestamp); }
 
 function mapSlaves(project: Project, id: ControllerId, map: (slave: Project['costumes'][number]['master']['slaves'][number]) => Project['costumes'][number]['master']['slaves'][number], timestamp: Timestamp): Project {

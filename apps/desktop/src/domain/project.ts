@@ -1,7 +1,7 @@
-import type { ProvisionalScore } from '../score/score';
+import type { Score } from '../score/score';
 import type { TimelineTimeMs } from './timelineTime';
 
-export const CURRENT_PROJECT_SCHEMA_VERSION = 1 as const;
+export const CURRENT_PROJECT_SCHEMA_VERSION = 2 as const;
 
 export type EntityId = string;
 export type ProjectId = EntityId;
@@ -70,7 +70,7 @@ export interface Project {
   updatedAt: string;
   audio: AudioTrack | null;
   costumes: Costume[];
-  score: ProvisionalScore;
+  score: Score;
   deviceBindings: DeviceBinding[];
 }
 

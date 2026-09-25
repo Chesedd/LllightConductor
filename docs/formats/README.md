@@ -1,7 +1,6 @@
 # Formats
 
-- [Project domain model](project-model.md) — schema v1 aggregate boundaries, hardware topology, invariants, and provisional score status.
-
-Reserved for future, versioned project and compiled-score format specifications. No final format is defined at this stage.
-
-- [Project file v1](project-file-v1.md) — the versioned `.lightshow` JSON format.
+- [Project domain model](project-model.md) — current aggregate boundaries and invariants.
+- [Score model v1](score-model-v1.md) — authoring intervals and timeline semantics.
+- [Project file v2](project-file-v2.md) — current `.lightshow` JSON format and V1 migration.
+- [Project file v1](project-file-v1.md) — legacy provisional-score format retained for compatibility.
