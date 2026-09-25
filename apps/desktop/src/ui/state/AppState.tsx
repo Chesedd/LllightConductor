@@ -18,6 +18,7 @@ interface AppStateValue extends WorkspaceSnapshot {
   navigate: (section: Section) => void; createProject: (name: string) => Promise<void>; openProject: () => Promise<void>;
   openRecent: (path: string) => Promise<void>; removeRecent: (path: string) => Promise<void>; save: () => Promise<void>; saveAs: () => Promise<void>;
   updateProject: (project: Project) => void; clearError: () => void;
+  undo: () => boolean; redo: () => boolean;
   audio: {
     availability: 'none' | 'loading' | 'ready' | 'missing' | 'error'; transport: PlaybackState;
     waveform: { status: 'idle' | 'loading' | 'ready' | 'error'; data: WaveformData | null; error: string | null };
@@ -29,7 +30,7 @@ interface AppStateValue extends WorkspaceSnapshot {
     renameMaster: (id: ControllerId, name: string) => boolean; addPico: (masterId: ControllerId, name: string) => boolean; renamePico: (id: ControllerId, name: string) => boolean; setPicoAddress: (id: ControllerId, address: number) => boolean; deletePico: (id: ControllerId) => boolean; movePico: (masterId: ControllerId, from: number, to: number) => boolean;
     addChannel: (picoId: ControllerId, name: string, output: string) => boolean; renameChannel: (id: ChannelId, name: string) => boolean; setChannelOutput: (id: ChannelId, output: string) => boolean; deleteChannel: (id: ChannelId) => boolean; moveChannel: (picoId: ControllerId, from: number, to: number) => boolean;
   };
-  score: { add: (input: { channelId: ChannelId; startMs: TimelineTimeMs; endMs: TimelineTimeMs }) => boolean; move: (id: EntityId, startMs: TimelineTimeMs) => boolean; resize: (id: EntityId, input: { startMs?: TimelineTimeMs; endMs?: TimelineTimeMs }) => boolean; remove: (id: EntityId) => boolean };
+  score: { add: (input: { channelId: ChannelId; startMs: TimelineTimeMs; endMs: TimelineTimeMs }) => boolean; addMany: (inputs: { channelId: ChannelId; startMs: TimelineTimeMs; endMs: TimelineTimeMs }[]) => EntityId[] | null; move: (id: EntityId, startMs: TimelineTimeMs) => boolean; moveMany: (ids: EntityId[], deltaMs: TimelineTimeMs) => boolean; resize: (id: EntityId, input: { startMs?: TimelineTimeMs; endMs?: TimelineTimeMs }) => boolean; remove: (id: EntityId) => boolean; removeMany: (ids: EntityId[]) => boolean };
 }
 const AppStateContext = createContext<AppStateValue | null>(null);
 
@@ -50,6 +51,7 @@ export function AppStateProvider({ children, workspace: supplied, playback: supp
   const confirmUnsaved = () => new Promise<UnsavedDecision>(resolve => { resolver.current = resolve; setConfirming(true); });
   const decide = (choice: UnsavedDecision) => { setConfirming(false); resolver.current?.(choice); resolver.current = null; };
   const edit = (operation: (project: Project, timestamp: Date) => Project) => { try { setError(null); workspace.editProject(operation); sync(); return true; } catch (cause) { setError(friendlyError(cause)); sync(); return false; } };
+  const workspaceAction = <T,>(operation: () => T): T | null => { try { setError(null); const result = operation(); sync(); return result; } catch (cause) { setError(friendlyError(cause)); sync(); return null; } };
   useEffect(() => { void run(() => workspace.initialize()); }, [workspace]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => playback.subscribe(setTransport), [playback]);
   const audioReference = snapshot.project?.audio?.reference;
@@ -61,24 +63,32 @@ export function AppStateProvider({ children, workspace: supplied, playback: supp
       if (!current) return;
       if (result.status === 'missing') { setAudioAvailability('missing'); setWaveform({ status: 'idle', data: null, error: null }); return; }
       if (result.status === 'unsupported') { setAudioAvailability('error'); setWaveform({ status: 'idle', data: null, error: null }); return; }
-      if (!alreadyLoaded) { try { await playback.load(result.url); if (current) setAudioAvailability('ready'); } catch { if (current) setAudioAvailability('error'); } }
+      if (!alreadyLoaded) { try { await playback.load(result.url); if (current) setAudioAvailability('ready'); } catch { if (current) setAudioAvailability('error'); } } else setAudioAvailability('ready');
       void waveformCache.get(referenceKey!, () => waveformExtractor.extract(result.url)).then(data => { if (current) setWaveform({ status: 'ready', data, error: null }); }).catch(cause => { if (current) setWaveform({ status: 'error', data: null, error: cause instanceof Error ? cause.message : String(cause) }); });
     }).catch(cause => { if (current) { setAudioAvailability('error'); setError(cause instanceof Error ? cause.message : String(cause)); } });
-    return () => { current = false; playback.unload(); };
+    return () => { current = false; };
   }, [snapshot.project?.id, audioReference, media, playback, waveformCache, waveformExtractor]); // intentionally follows persisted media identity
-  const chooseAudio = async () => { const path = await media.choose(); if (!path) return; setAudioAvailability('loading'); const resolved = await media.resolve({ type: 'external-uri', uri: path }); if (resolved.status !== 'available') throw new Error('The selected audio file cannot be read.'); const metadata = await playback.load(resolved.url); preloadedAudio.current = JSON.stringify({ type: 'external-uri', uri: path }); workspace.editProject((project, at) => setProjectAudio(project, { displayName: media.displayName(path), uri: path, durationMs: metadata.durationMs, mediaType: metadata.mediaType ?? media.mediaType(path) }, createStableId, at)); sync(); setAudioAvailability('ready'); };
+  const chooseAudio = async () => { const path = await media.choose(); if (!path) return; setAudioAvailability('loading'); const resolved = await media.resolve({ type: 'external-uri', uri: path }); if (resolved.status !== 'available') throw new Error('The selected audio file cannot be read.'); const metadata = await playback.load(resolved.url); preloadedAudio.current = JSON.stringify({ type: 'external-uri', uri: path }); workspace.editProject((project, at) => setProjectAudio(project, { displayName: media.displayName(path), uri: path, durationMs: metadata.durationMs, mediaType: metadata.mediaType ?? media.mediaType(path) }, createStableId, at)); setAudioAvailability('ready'); sync(); };
   const value: AppStateValue = { ...snapshot, section, error, clearError: () => setError(null), navigate: (next) => { if (next === 'Projects' && section === 'Editor') void run(async () => { if (await workspace.close(confirmUnsaved)) setSection(next); }); else setSection(next); },
     createProject: async name => run(async () => { const project = await creator.createProject(name); if (await workspace.newProject(() => project, confirmUnsaved)) setSection('Editor'); }),
     openProject: async () => run(async () => { if (await workspace.chooseAndOpen(confirmUnsaved)) setSection('Editor'); }),
     openRecent: async path => run(async () => { if (await workspace.openRecent(path, confirmUnsaved)) setSection('Editor'); }), removeRecent: path => run(() => workspace.removeRecent(path)),
-    save: () => run(() => workspace.save()), saveAs: () => run(() => workspace.saveAs()), updateProject: project => { workspace.replaceProject(project); sync(); },
+    save: () => run(() => workspace.save()), saveAs: () => run(() => workspace.saveAs()), updateProject: project => { workspace.replaceProject(project); sync(); }, undo: () => { playback.pause(); return workspaceAction(() => workspace.undo()) ?? false; }, redo: () => { playback.pause(); return workspaceAction(() => workspace.redo()) ?? false; },
     audio: { availability: audioAvailability, transport, waveform, importAudio: () => run(chooseAudio), locateAudio: () => run(chooseAudio), removeAudio: () => { playback.unload(); edit((project, at) => removeProjectAudio(project, at)); setAudioAvailability('none'); setWaveform({ status: 'idle', data: null, error: null }); }, play: () => run(() => playback.play()), pause: () => playback.pause(), seek: value => playback.seek(timelineTime(value)) },
     topology: {
       addCostume: name => edit((project, at) => addCostume(project, name, createStableId, at)), renameCostume: (id, name) => edit((project, at) => renameCostume(project, id, name, at)), deleteCostume: id => edit((project, at) => removeCostume(project, id, at)), moveCostume: (from, to) => edit((project, at) => reorderCostumes(project, from, to, at)),
       renameMaster: (id, name) => edit((project, at) => renameMaster(project, id, name, at)), addPico: (id, name) => edit((project, at) => addSlave(project, id, { displayName: name }, createStableId, at)), renamePico: (id, name) => edit((project, at) => renameSlave(project, id, name, at)), setPicoAddress: (id, address) => edit((project, at) => changeSlaveLogicalAddress(project, id, address, at)), deletePico: id => edit((project, at) => removeSlave(project, id, at)), movePico: (id, from, to) => edit((project, at) => reorderSlaves(project, id, from, to, at)),
       addChannel: (id, name, output) => edit((project, at) => addChannel(project, id, { displayName: name, hardwareOutputIdentifier: output }, createStableId, at)), renameChannel: (id, name) => edit((project, at) => renameChannel(project, id, name, at)), setChannelOutput: (id, output) => edit((project, at) => changeChannelHardwareOutputIdentifier(project, id, output, at)), deleteChannel: id => edit((project, at) => removeChannel(project, id, at)), moveChannel: (id, from, to) => edit((project, at) => reorderChannels(project, id, from, to, at)),
     },
-    score: { add: input => edit(() => { workspace.addLightInterval(input); return workspace.snapshot().project!; }), move: (id, startMs) => edit(() => { workspace.moveLightInterval(id, startMs); return workspace.snapshot().project!; }), resize: (id, input) => edit(() => { workspace.resizeLightInterval(id, input); return workspace.snapshot().project!; }), remove: id => edit(() => { workspace.removeScoreEvent(id); return workspace.snapshot().project!; }) },
+    score: {
+      add: input => workspaceAction(() => { workspace.addLightInterval(input); return true; }) ?? false,
+      addMany: inputs => workspaceAction(() => workspace.addScoreEvents(inputs)),
+      move: (id, startMs) => workspaceAction(() => { workspace.moveLightInterval(id, startMs); return true; }) ?? false,
+      moveMany: (ids, deltaMs) => workspaceAction(() => { workspace.moveScoreEvents(ids, deltaMs); return true; }) ?? false,
+      resize: (id, input) => workspaceAction(() => { workspace.resizeLightInterval(id, input); return true; }) ?? false,
+      remove: id => workspaceAction(() => { workspace.removeScoreEvent(id); return true; }) ?? false,
+      removeMany: ids => workspaceAction(() => { workspace.removeScoreEvents(ids); return true; }) ?? false,
+    },
   };
   return <AppStateContext.Provider value={value}>{children}{confirming && <UnsavedDialog onChoose={decide}/>} {error && <ErrorDialog message={error} onClose={() => setError(null)}/>}</AppStateContext.Provider>;
 }
