@@ -1,0 +1,5 @@
+menu "Lllight Master"
+config LLLIGHT_DEMO_AUTO_START
+    bool "Auto-start demo when READY (bench use only)"
+    default n
+endmenu
