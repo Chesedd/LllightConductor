@@ -1,4 +1,5 @@
 import type { ProvisionalScore } from '../score/score';
+import type { TimelineTimeMs } from './timelineTime';
 
 export const CURRENT_PROJECT_SCHEMA_VERSION = 1 as const;
 
@@ -50,7 +51,7 @@ export interface AudioTrack {
   id: EntityId;
   displayName: string;
   reference: AudioReference;
-  durationMs?: number;
+  durationMs?: TimelineTimeMs;
   mediaType?: string;
 }
 
