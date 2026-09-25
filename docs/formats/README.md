@@ -1,5 +1,7 @@
 # Formats
 
+- [Prepared Master Binary v1](prepared-master-binary-v1.md)
+
 - [Project domain model](project-model.md) — current aggregate boundaries and invariants.
 - [Score model v1](score-model-v1.md) — authoring intervals and timeline semantics.
 - [Project file v3](project-file-v3.md) — current `.lightshow` JSON format and explicit Pico output mappings.
