@@ -16,6 +16,8 @@ export function validateProject(project: Project): ValidationIssue[] {
   };
 
   required(project.name, 'name', issues);
+  if (!isIsoTimestamp(project.createdAt)) issues.push({ path: 'createdAt', message: 'Timestamp must be a valid ISO 8601 date' });
+  if (!isIsoTimestamp(project.updatedAt)) issues.push({ path: 'updatedAt', message: 'Timestamp must be a valid ISO 8601 date' });
   addId(project.id, 'id');
   if (project.audio) addId(project.audio.id, 'audio.id');
   project.costumes.forEach((costume, costumeIndex) => {
@@ -45,9 +47,17 @@ export function validateProject(project: Project): ValidationIssue[] {
       });
     });
   });
-  project.deviceBindings.forEach((binding, index) => addId(binding.id, `deviceBindings[${index}].id`));
+  const controllerIds = new Set(project.costumes.flatMap(({ master }) => [master.id, ...master.slaves.map(({ id }) => id)]));
+  project.deviceBindings.forEach((binding, index) => {
+    addId(binding.id, `deviceBindings[${index}].id`);
+    if (!controllerIds.has(binding.logicalControllerId)) issues.push({ path: `deviceBindings[${index}].logicalControllerId`, message: 'Binding must reference an existing controller' });
+    if (!binding.physicalDevice.type.trim()) issues.push({ path: `deviceBindings[${index}].physicalDevice.type`, message: 'Device type is required' });
+    if (!binding.physicalDevice.hardwareId.trim()) issues.push({ path: `deviceBindings[${index}].physicalDevice.hardwareId`, message: 'Hardware ID is required' });
+  });
   return issues;
 }
+
+const isIsoTimestamp = (value: string) => !Number.isNaN(Date.parse(value)) && new Date(value).toISOString() === value;
 
 export function assertValidProject(project: Project): void {
   const issues = validateProject(project);

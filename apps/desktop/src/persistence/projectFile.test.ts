@@ -1,0 +1,17 @@
+import { describe, expect, it } from 'vitest';
+import type { Project } from '../domain/project';
+import { parseProjectFile, persistedV1ToProject, projectToPersistedV1, ProjectFileError, serializeProjectFile } from './projectFile';
+
+const project = (): Project => ({ schemaVersion: 1, id: 'project-1', name: 'Show', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-02-01T00:00:00.000Z', audio: { id: 'audio-1', displayName: 'Music', reference: { type: 'external-uri', uri: 'file:///music.wav' }, durationMs: 1200, mediaType: 'audio/wav' }, costumes: [{ id: 'costume-1', name: 'Red', master: { id: 'master-1', displayName: 'Master', type: 'esp32', slaves: [{ id: 'slave-1', displayName: 'Left', type: 'raspberry-pi-pico', logicalAddress: 2, channels: [{ id: 'channel-1', displayName: 'Sleeve', type: 'el-wire', hardwareOutputIdentifier: 'A' }] }] } }], score: { format: 'provisional', version: 1 }, deviceBindings: [{ id: 'binding-1', logicalControllerId: 'slave-1', physicalDevice: { type: 'pico', hardwareId: 'ABC' } }] });
+const errorCode = (operation: () => unknown, code: ProjectFileError['code']) => { try { operation(); throw new Error('did not throw'); } catch (error) { expect(error).toBeInstanceOf(ProjectFileError); expect((error as ProjectFileError).code).toBe(code); } };
+
+describe('project file v1', () => {
+  it('maps Project to an explicit persisted DTO', () => { const dto = projectToPersistedV1(project()); expect(dto).toEqual(expect.objectContaining({ schemaVersion: 1, id: 'project-1', provisionalScore: { format: 'provisional', version: 1 } })); expect(dto).not.toHaveProperty('score'); });
+  it('maps PersistedProjectV1 to a validated Project', () => expect(persistedV1ToProject(projectToPersistedV1(project()))).toEqual(project()));
+  it('round-trips IDs, topology, bindings, score, audio, and timestamps', () => { const original = project(); const loaded = parseProjectFile(serializeProjectFile(original)); expect(loaded.id).toBe(original.id); expect(loaded.costumes).toEqual(original.costumes); expect(loaded.deviceBindings).toEqual(original.deviceBindings); expect(loaded.score).toEqual(original.score); expect(loaded.audio).toEqual(original.audio); expect([loaded.createdAt, loaded.updatedAt]).toEqual([original.createdAt, original.updatedAt]); });
+  it('classifies invalid JSON', () => errorCode(() => parseProjectFile('{'), 'invalid-json'));
+  it('classifies a missing schemaVersion', () => errorCode(() => parseProjectFile('{}'), 'missing-version'));
+  it('rejects a future schemaVersion with a compatibility message', () => { try { parseProjectFile('{"schemaVersion":2}'); } catch (error) { expect(error).toMatchObject({ code: 'unsupported-version' }); expect((error as Error).message).toContain('supports up to version 1'); } });
+  it('rejects malformed structures and invalid IDs', () => { const dto = projectToPersistedV1(project()) as unknown as Record<string, unknown>; dto.costumes = 'bad'; errorCode(() => persistedV1ToProject(dto), 'malformed'); const invalid = projectToPersistedV1(project()); invalid.id = '\u0000'; errorCode(() => persistedV1ToProject(invalid), 'malformed'); });
+  it('rejects domain invariant violations after structural validation', () => { const dto = projectToPersistedV1(project()); dto.costumes[0].master.slaves[0].channels.push({ ...dto.costumes[0].master.slaves[0].channels[0], id: 'channel-2' }); errorCode(() => persistedV1ToProject(dto), 'domain-invalid'); });
+});
