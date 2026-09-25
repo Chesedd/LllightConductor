@@ -5,6 +5,7 @@ export interface ProjectRepository {
   list(): Promise<ProjectSummary[]>;
   get(id: ProjectId): Promise<Project | null>;
   save(project: Project): Promise<void>;
+  delete(id: ProjectId): Promise<void>;
 }
 
 export class InMemoryProjectRepository implements ProjectRepository {
@@ -12,4 +13,5 @@ export class InMemoryProjectRepository implements ProjectRepository {
   async list(): Promise<ProjectSummary[]> { return [...this.#projects.values()].map(({ id, name, updatedAt }) => ({ id, name, updatedAt })); }
   async get(id: ProjectId): Promise<Project | null> { return this.#projects.get(id) ?? null; }
   async save(project: Project): Promise<void> { this.#projects.set(project.id, project); }
+  async delete(id: ProjectId): Promise<void> { this.#projects.delete(id); }
 }

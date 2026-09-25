@@ -14,4 +14,14 @@ export class ProjectService {
     await this.projects.save(project);
     return project;
   }
+  async renameProject(id: Project['id'], name: string): Promise<Project> {
+    const normalizedName = name.trim();
+    if (!normalizedName) throw new Error('Project name is required');
+    const current = await this.projects.get(id);
+    if (!current) throw new Error('Project not found');
+    const project = { ...current, name: normalizedName, updatedAt: this.now().toISOString() };
+    await this.projects.save(project);
+    return project;
+  }
+  async deleteProject(id: Project['id']): Promise<void> { await this.projects.delete(id); }
 }
