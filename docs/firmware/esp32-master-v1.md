@@ -5,10 +5,16 @@
 The ESP32 is the single show-clock authority in one costume. It retains an already
 prepared show, validates it, establishes Protocol v1 sessions, forces Pico outputs
 OFF, schedules frames, sends one batch per slave, processes responses asynchronously,
-records faults, and attempts a safe reset on stop/fatal failure. There is deliberately
-no desktop protocol, upload format, Wi-Fi/Bluetooth/OTA, or multi-ESP synchronization.
+records faults, and attempts a safe reset on stop/fatal failure. It also implements
+the portable Desktop Protocol v1 receive/control stack; a real USB/UART desktop
+adapter remains deliberately out of scope, as do Wi-Fi/Bluetooth/OTA and multi-ESP
+synchronization.
 
 ```text
+DesktopTransport -> Desktop streaming parser / frame codec
+  -> DesktopCommandProcessor -> upload staging / PMB1 decoder
+  -> owned candidate -> atomic active selection
+  -> ShowController
 PreparedMasterShow
   -> ShowScheduler
   -> ShowController / Pico command planner
@@ -17,11 +23,42 @@ PreparedMasterShow
   -> PicoTransport (ESP-IDF UART or host fake)
 ```
 
+The Desktop and Pico codecs have explicit names and are independent. Desktop frames
+use explicit little-endian access, CRC-32/ISO-HDLC, a 1024-byte payload limit, and a
+bounded 1040-byte parser. Uploads are sequential and limited to 512 KiB. `END_UPLOAD`
+verifies portable SHA-256 over the canonical bytes and decodes an owning
+`OwnedPreparedMasterShow`; scheduler views are rebuilt from that owned storage and
+never point into the discarded upload transaction.
+
+One validated candidate and one active artifact are held separately. Failed upload
+or validation cannot modify the active artifact, and only `ACTIVATE_SHOW` atomically
+moves the candidate into the active slot. Both are RAM-only and disappear on reboot;
+flash persistence is a later stage.
+
+`DeviceIdentityProvider` separates the required stable 128-bit identity from the
+protocol core. Host tests inject a fixed identity. No ESP-IDF hardware identity
+provider is wired yet, so production integration must derive and persist a stable ID
+before exposing a real desktop transport; it must never generate one per HELLO.
+
 `ShowController` owns lifecycle decisions, `SessionManager` owns mutable per-Pico
 state, and `ShowScheduler` owns clock position and diagnostics. Production has one
 polling control task, so ISR and scheduler never race. Fixed arrays bound sessions
 (8), pending requests (8 per Pico), payloads (64 bytes), and parser storage; realtime
 dispatch allocates no memory.
+
+Desktop HELLO creates a communication session, clears the bounded 16-entry replay
+window, and cancels only an incomplete upload. Candidate/active artifacts and Pico
+execution survive reconnection. Exact duplicate requests in the retained window
+replay the exact encoded response; conflicting reuse is rejected. After sequence
+wrap, clients must not reuse a sequence that is still in this finite window for a
+different request.
+
+Wire state is produced in one mapping: upload takes precedence, Pico preparation and
+ready map to `READY`, scheduler execution maps to `RUNNING`, and controller fault
+maps to `FAULT`. STATUS reports owned artifact identities/duration, monotonic clamped
+position, real configured/online Pico counts, and scheduler lateness. Fault detail is
+numeric; raw C++ strings are not a wire API. START is acknowledged after asynchronous
+preparation is accepted, and STOP uses the existing scheduler-stop/Pico-reset path.
 
 The normative contract remains
 [`esp32-pico-protocol-v1.md`](../protocols/esp32-pico-protocol-v1.md). A separate
@@ -124,7 +161,7 @@ independence/wrap, response matching, NACK, retry exhaustion, nonblocking realti
 ACK, supersession, parser recovery, fixed Protocol v1 vectors, and
 `123456789 -> 0x29B1`. An in-memory Pico peer integration flow covers HELLO,
 HELLO_ACK, reset/ACK, READY, timed SET_OUTPUTS/ACK, and stop/reset.
-
-A future loader can replace the demo at the prepared-show boundary. It must not make
-the scheduler understand desktop models; this stage intentionally specifies no
-desktop-to-ESP32 communication.
+Desktop host coverage additionally checks literal TypeScript frame fixtures,
+CRC-32 `123456789 -> CBF43926`, byte streaming/recovery, the canonical PMB1 fixture
+and SHA-256, upload/candidate/activation, replay, session replacement, START, STATUS,
+and STOP through fake desktop and Pico transports.

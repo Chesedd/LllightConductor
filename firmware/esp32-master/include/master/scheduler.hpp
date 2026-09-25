@@ -10,6 +10,7 @@ class ShowScheduler { public:
   ShowScheduler(MonotonicClock& clock,FrameSink& sink):clock_(clock),sink_(sink){}
   void start(const PreparedMasterShow& show); void stop(); bool tick(); bool running()const{return running_;}
   int64_t next_deadline_us()const; const TimingDiagnostics& diagnostics()const{return diagnostics_;}
+  uint32_t position_ms()const;
  private: MonotonicClock& clock_; FrameSink& sink_; const PreparedMasterShow* show_{}; size_t next_{};
   int64_t start_us_{}; bool running_{}; TimingDiagnostics diagnostics_{};
 };

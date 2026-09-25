@@ -25,6 +25,7 @@ class SessionManager {
   void ingest(const uint8_t* data,size_t size); void service_timeouts();
   const SlaveSession* find(uint8_t address) const; SlaveSession* find(uint8_t address);
   bool all_online() const; bool all_clear() const; size_t pending_control() const;
+  size_t configured_count()const;size_t online_count()const;
  private:
   PicoTransport& transport_; MonotonicClock& clock_; uint32_t nonce_; SessionEvents* events_; std::array<SlaveSession,8> slaves_{};
   protocol::Parser parser_; bool send_request(SlaveSession&,protocol::Type,const uint8_t*,size_t,RequestClass,const PreparedSlaveBatch*);
