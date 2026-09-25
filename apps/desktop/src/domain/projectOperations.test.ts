@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ProjectService } from '../application/projectService';
 import { InMemoryProjectRepository } from '../persistence/projectRepository';
 import type { Project } from './project';
-import { addChannel, addCostume, addSlave, removeChannel, removeCostume, removeSlave, renameChannel, renameCostume, renameSlave, reorderChannels, reorderCostumes, reorderSlaves } from './projectOperations';
+import { addChannel, addCostume, addSlave, changeChannelHardwareOutputIdentifier, changeSlaveLogicalAddress, removeChannel, removeCostume, removeSlave, renameChannel, renameCostume, renameMaster, renameSlave, reorderChannels, reorderCostumes, reorderSlaves } from './projectOperations';
 import { validateProject } from './projectValidation';
 
 const at = '2026-02-02T00:00:00.000Z';
@@ -46,9 +46,10 @@ describe('project domain operations', () => {
   it('renames every entity without changing its ID', async () => {
     let project = await topology();
     project = renameCostume(project, 'costume', 'Crimson', at);
+    project = renameMaster(project, 'master', 'Main ESP32', at);
     project = renameSlave(project, 'slave', 'Right', at);
     project = renameChannel(project, 'channel', 'Cuff', at);
-    expect(project.costumes[0]).toMatchObject({ id: 'costume', name: 'Crimson', master: { slaves: [{ id: 'slave', displayName: 'Right', channels: [{ id: 'channel', displayName: 'Cuff' }] }] } });
+    expect(project.costumes[0]).toMatchObject({ id: 'costume', name: 'Crimson', master: { id: 'master', displayName: 'Main ESP32', slaves: [{ id: 'slave', displayName: 'Right', channels: [{ id: 'channel', displayName: 'Cuff' }] }] } });
   });
 
   it('reorders entities without changing IDs', async () => {
@@ -71,6 +72,16 @@ describe('project domain operations', () => {
     expect(removeCostume(original, 'costume', at).costumes).toEqual([]);
   });
 
+  it('cleans durable controller bindings when Pico or Costume controllers are removed', async () => {
+    const original = await topology();
+    const bound = { ...original, deviceBindings: [
+      { id: 'master-binding', logicalControllerId: 'master', physicalDevice: { type: 'esp32', hardwareId: 'M' } },
+      { id: 'slave-binding', logicalControllerId: 'slave', physicalDevice: { type: 'pico', hardwareId: 'S' } },
+    ] };
+    expect(removeSlave(bound, 'slave', at).deviceBindings.map(value => value.id)).toEqual(['master-binding']);
+    expect(removeCostume(bound, 'costume', at).deviceBindings).toEqual([]);
+  });
+
   it('updates updatedAt after a mutation', async () => {
     expect(addCostume(await emptyProject(), 'Red', ids('costume', 'master'), at).updatedAt).toBe(at);
   });
@@ -81,9 +92,40 @@ describe('project domain operations', () => {
     expect(() => addSlave(project, 'master', { displayName: 'Two', logicalAddress: 7 }, ids('two'), at)).toThrow('Logical address must be unique');
   });
 
+  it('assigns the first free logical address and reuses a released address', async () => {
+    let project = addCostume(await emptyProject(), 'Red', ids('costume', 'master'), at);
+    project = addSlave(project, 'master', { displayName: 'Zero' }, ids('zero'), at);
+    project = addSlave(project, 'master', { displayName: 'One' }, ids('one'), at);
+    project = removeSlave(project, 'zero', at);
+    project = addSlave(project, 'master', { displayName: 'Replacement' }, ids('replacement'), at);
+    expect(project.costumes[0].master.slaves.map(value => [value.id, value.logicalAddress])).toEqual([['one', 1], ['replacement', 0]]);
+    expect(project.costumes[0].master.slaves.every(value => value.type === 'raspberry-pi-pico')).toBe(true);
+  });
+
+  it('changes a logical address while preserving ID and rejects invalid or duplicate values', async () => {
+    let project = await topology();
+    project = addSlave(project, 'master', { displayName: 'Other', logicalAddress: 2 }, ids('other'), at);
+    const changed = changeSlaveLogicalAddress(project, 'slave', 3, at);
+    expect(changed.costumes[0].master.slaves[0]).toMatchObject({ id: 'slave', logicalAddress: 3 });
+    expect(() => changeSlaveLogicalAddress(project, 'slave', 2, at)).toThrow('Logical address must be unique');
+    expect(() => changeSlaveLogicalAddress(project, 'slave', -1, at)).toThrow('non-negative integer');
+    expect(() => changeSlaveLogicalAddress(project, 'slave', 1.5, at)).toThrow('non-negative integer');
+  });
+
   it('detects a conflicting hardware output identifier', async () => {
     const project = await topology();
     expect(() => addChannel(project, 'slave', { displayName: 'Other', hardwareOutputIdentifier: 'OUT-A' }, ids('other'), at)).toThrow('Hardware output identifier must be unique');
+  });
+
+  it('changes and trims a channel output identifier while preserving ID', async () => {
+    const project = changeChannelHardwareOutputIdentifier(await topology(), 'channel', '  GP0  ', at);
+    expect(project.costumes[0].master.slaves[0].channels[0]).toMatchObject({ id: 'channel', type: 'el-wire', hardwareOutputIdentifier: 'GP0' });
+  });
+
+  it('allows the same hardware output identifier on different Pico controllers', async () => {
+    let project = await topology();
+    project = addSlave(project, 'master', { displayName: 'Other' }, ids('other'), at);
+    expect(() => addChannel(project, 'other', { displayName: 'Other wire', hardwareOutputIdentifier: 'OUT-A' }, ids('other-channel'), at)).not.toThrow();
   });
 
   it.each([

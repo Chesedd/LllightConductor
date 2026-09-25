@@ -17,4 +17,57 @@ describe('desktop application shell', () => {
   it('asks before leaving a dirty project and Cancel keeps it open', async () => { render(<App />); await createProject(); fireEvent.click(screen.getByRole('button', { name: 'Projects' })); expect(screen.getByRole('dialog')).toHaveTextContent('Unsaved changes'); fireEvent.click(screen.getByRole('button', { name: 'Cancel' })); expect(screen.getByLabelText('Aurora Show editor')).toBeInTheDocument(); });
   it("Don't Save closes a dirty project", async () => { render(<App />); await createProject(); fireEvent.click(screen.getByRole('button', { name: 'Projects' })); fireEvent.click(screen.getByRole('button', { name: "Don't Save" })); expect(await screen.findByText('No recent projects')).toBeInTheDocument(); });
   it('navigates between non-destructive sections', () => { render(<App />); for (const name of ['Editor', 'Devices', 'Settings']) { fireEvent.click(screen.getByRole('button', { name })); expect(screen.getByRole('heading', { name, level: 1 })).toBeInTheDocument(); } });
+
+  it('builds and displays a costume, ESP32 master, Pico, and EL wire channel', async () => {
+    render(<App />); await createProject();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Add Costume' })[0]);
+    fireEvent.change(screen.getByLabelText('Display name'), { target: { value: 'Neon Suit' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Add Costume' }).at(-1)!);
+    expect(screen.getByText('ESP32 Master')).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Add Pico' }).at(-1)!);
+    fireEvent.change(screen.getByLabelText('Display name'), { target: { value: 'Torso Controller' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Add Pico' }).at(-1)!);
+    expect(screen.getByText('Pico 0')).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Add Channel' }).at(-1)!);
+    fireEvent.change(screen.getByLabelText('Display name'), { target: { value: 'Body outline' } });
+    fireEvent.change(screen.getByLabelText('Hardware output identifier'), { target: { value: '  OUT1  ' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Add Channel' }).at(-1)!);
+    expect(screen.getByText('Body outline')).toBeInTheDocument();
+    expect(screen.getByLabelText('Project toolbar')).toHaveTextContent('Aurora Show *');
+  });
+
+  it('shows contextual inspector fields and keeps stable IDs secondary', async () => {
+    render(<App />); await createProject();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Add Costume' })[0]); fireEvent.click(screen.getAllByRole('button', { name: 'Add Costume' }).at(-1)!);
+    fireEvent.click(screen.getByText('Costume 1'));
+    expect(screen.getByRole('heading', { name: 'Costume' })).toBeInTheDocument();
+    expect(screen.getByText('Stable ID')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Renamed Costume' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply changes' }));
+    expect(screen.getByText('Renamed Costume')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['Costume', async () => { fireEvent.click(screen.getAllByRole('button', { name: 'Add Costume' })[0]); fireEvent.click(screen.getAllByRole('button', { name: 'Add Costume' }).at(-1)!); }],
+    ['Pico', async () => { fireEvent.click(screen.getAllByRole('button', { name: 'Add Costume' })[0]); fireEvent.click(screen.getAllByRole('button', { name: 'Add Costume' }).at(-1)!); fireEvent.click(screen.getAllByRole('button', { name: 'Add Pico' }).at(-1)!); fireEvent.click(screen.getAllByRole('button', { name: 'Add Pico' }).at(-1)!); }],
+    ['Channel', async () => { fireEvent.click(screen.getAllByRole('button', { name: 'Add Costume' })[0]); fireEvent.click(screen.getAllByRole('button', { name: 'Add Costume' }).at(-1)!); fireEvent.click(screen.getAllByRole('button', { name: 'Add Pico' }).at(-1)!); fireEvent.click(screen.getAllByRole('button', { name: 'Add Pico' }).at(-1)!); fireEvent.click(screen.getAllByRole('button', { name: 'Add Channel' }).at(-1)!); fireEvent.change(screen.getByLabelText('Hardware output identifier'), { target: { value: 'GP0' } }); fireEvent.click(screen.getAllByRole('button', { name: 'Add Channel' }).at(-1)!); }],
+  ])('requires confirmation before deleting a %s', async (kind, setupTopology) => {
+    render(<App />); await createProject(); await setupTopology();
+    const deleteButtons = screen.getAllByRole('button', { name: 'Delete' }); fireEvent.click(deleteButtons.at(-1)!);
+    expect(screen.getByRole('dialog')).toHaveTextContent(`Delete ${kind}`);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  });
+
+  it('clears selection when its selected ancestor is deleted', async () => {
+    render(<App />); await createProject(); fireEvent.click(screen.getAllByRole('button', { name: 'Add Costume' })[0]); fireEvent.click(screen.getAllByRole('button', { name: 'Add Costume' }).at(-1)!);
+    fireEvent.click(screen.getByText('ESP32 Master')); expect(screen.getByRole('heading', { name: 'ESP32 Master' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' })); fireEvent.click(screen.getAllByRole('button', { name: 'Delete' }).at(-1)!);
+    expect(screen.getByText('No selection')).toBeInTheDocument();
+  });
+
+  it('collapses and expands topology without changing project dirty state', async () => {
+    render(<App />); await createProject(); fireEvent.click(screen.getAllByRole('button', { name: 'Add Costume' })[0]); fireEvent.click(screen.getAllByRole('button', { name: 'Add Costume' }).at(-1)!);
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse Costume 1' })); expect(screen.queryByText('ESP32 Master')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Costume 1' })); expect(screen.getByText('ESP32 Master')).toBeInTheDocument(); expect(screen.getByLabelText('Project toolbar')).toHaveTextContent('Aurora Show *');
+  });
 });
