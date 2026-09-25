@@ -3,8 +3,8 @@ import { ChevronDown, ChevronRight, FolderKanban, Music, Pause, Play, Save, Uplo
 import { useAppState } from '../state/AppState';
 import { EmptyState } from '../components/EmptyState';
 import { ConfirmationDialog } from '../components/ConfirmationDialog';
-import type { ChannelId, ControllerId, CostumeId, Project } from '../../domain/project';
-import { formatTimelineTime, timelineTime } from '../../domain/timelineTime';
+import type { ChannelId, ControllerId, CostumeId, EntityId, Project } from '../../domain/project';
+import { formatTimelineTime, parseTimelineTime, timelineTime } from '../../domain/timelineTime';
 import { TimelineSurface } from '../components/TimelineSurface';
 
 type Selection = { kind: 'costume'; id: CostumeId } | { kind: 'master' | 'pico'; id: ControllerId } | { kind: 'channel'; id: ChannelId };
@@ -12,12 +12,15 @@ type CreateRequest = { kind: 'costume' } | { kind: 'pico'; parentId: ControllerI
 type DeleteRequest = { selection: Selection; name: string };
 
 export function EditorPage() {
-  const { project, navigate, topology, audio } = useAppState();
+  const { project, navigate, topology, audio, score } = useAppState();
   const [selection, setSelection] = useState<Selection | null>(null);
   const [createRequest, setCreateRequest] = useState<CreateRequest | null>(null);
   const [deleteRequest, setDeleteRequest] = useState<DeleteRequest | null>(null);
   const [removeAudioRequested, setRemoveAudioRequested] = useState(false);
-  useEffect(() => setSelection(null), [project?.id]);
+  const [selectedScoreEventId, setSelectedScoreEventId] = useState<EntityId | null>(null);
+  useEffect(() => { setSelection(null); setSelectedScoreEventId(null); }, [project?.id]);
+  useEffect(() => { if (selectedScoreEventId && !project?.score.events.some(event => event.id === selectedScoreEventId)) setSelectedScoreEventId(null); }, [project, selectedScoreEventId]);
+  useEffect(() => { const key = (event: KeyboardEvent) => { if (event.key === 'Escape') setSelectedScoreEventId(null); if ((event.key === 'Delete' || event.key === 'Backspace') && selectedScoreEventId && !(event.target instanceof HTMLInputElement)) { event.preventDefault(); if (score.remove(selectedScoreEventId)) setSelectedScoreEventId(null); } }; window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key); }, [score, selectedScoreEventId]);
   if (!project) return <section className="page-content"><EmptyState icon={<FolderKanban size={28}/>} title="No project open" description="Open a project before entering the editor." action={<button className="button primary" onClick={() => navigate('Projects')}>Back to Projects</button>} /></section>;
 
   const deleteEntity = () => {
@@ -31,8 +34,8 @@ export function EditorPage() {
     <EditorToolbar />
     <div className="editor-body">
       <ProjectTree project={project} selection={selection} onSelect={setSelection} onCreate={setCreateRequest} onDelete={(item, name) => setDeleteRequest({ selection: item, name })} />
-      <div className="timeline-column"><AudioPanel onRemove={() => setRemoveAudioRequested(true)}/><TimelineSurface projectId={project.id}/></div>
-      <Inspector project={project} selection={selection} />
+      <div className="timeline-column"><AudioPanel onRemove={() => setRemoveAudioRequested(true)}/><TimelineSurface projectId={project.id} selectedEventId={selectedScoreEventId} onSelectEvent={id => { setSelectedScoreEventId(id); if (id) setSelection(null); }}/></div>
+      <Inspector project={project} selection={selection} selectedEventId={selectedScoreEventId} onDeleted={() => setSelectedScoreEventId(null)} />
     </div>
     {createRequest && <CreateDialog request={createRequest} costumeNumber={project.costumes.length + 1} onClose={() => setCreateRequest(null)} />}
     {deleteRequest && <ConfirmationDialog title={`Delete ${labelFor(deleteRequest.selection)} “${deleteRequest.name}”?`} description="This also removes its child topology and cannot be undone." confirmLabel="Delete" danger onCancel={() => setDeleteRequest(null)} onConfirm={deleteEntity} />}
@@ -93,8 +96,10 @@ function CreateDialog({ request, costumeNumber, onClose }: { request: CreateRequ
   return <div className="dialog-backdrop"><form className="dialog" role="dialog" aria-modal="true" aria-labelledby="create-title" onSubmit={submit}><h2 id="create-title">Add {kind === 'costume' ? 'Costume' : kind === 'pico' ? 'Pico' : 'Channel'}</h2><label htmlFor="new-name">Display name</label><input id="new-name" autoFocus value={name} onChange={event => setName(event.target.value)}/>{kind === 'channel' && <><label htmlFor="new-output">Hardware output identifier</label><input id="new-output" placeholder="GP0, OUT1, CH3…" value={output} onChange={event => setOutput(event.target.value)}/></>}<div className="dialog-actions"><button type="button" className="button secondary" onClick={onClose}>Cancel</button><button className="button primary">Add {kind === 'costume' ? 'Costume' : kind === 'pico' ? 'Pico' : 'Channel'}</button></div></form></div>;
 }
 
-function Inspector({ project, selection }: { project: Project; selection: Selection | null }) {
-  const { topology } = useAppState();
+function Inspector({ project, selection, selectedEventId, onDeleted }: { project: Project; selection: Selection | null; selectedEventId: EntityId | null; onDeleted: () => void }) {
+  const { topology, score } = useAppState();
+  const scoreEvent = project.score.events.find(event => event.id === selectedEventId);
+  if (scoreEvent) { const channel = project.costumes.flatMap(costume => costume.master.slaves).flatMap(pico => pico.channels).find(value => value.id === scoreEvent.channelId); return <ScoreEventInspector key={scoreEvent.id} event={scoreEvent} channelName={channel?.displayName ?? 'Unknown channel'} onSave={(startMs, endMs) => score.resize(scoreEvent.id, { startMs, endMs })} onDelete={() => { if (score.remove(scoreEvent.id)) onDeleted(); }}/>; }
   if (!selection) return <aside className="inspector"><p className="panel-label">INSPECTOR</p><div className="inspector-empty"><strong>No selection</strong><p>Select a costume, controller, or channel to edit its properties.</p></div></aside>;
   for (const costume of project.costumes) {
     if (selection.kind === 'costume' && selection.id === costume.id) return <InspectorForm key={`${selection.kind}-${selection.id}`} title="Costume" id={costume.id} fields={[{ label: 'Name', value: costume.name, save: value => topology.renameCostume(costume.id, value) }]} summary={`${costume.master.displayName} · ${costume.master.slaves.length} Pico controller(s)`}/>;
@@ -106,6 +111,12 @@ function Inspector({ project, selection }: { project: Project; selection: Select
     }
   }
   return <aside className="inspector"><p className="panel-label">INSPECTOR</p><p className="muted">The selected element no longer exists.</p></aside>;
+}
+
+function ScoreEventInspector({ event, channelName, onSave, onDelete }: { event: Project['score']['events'][number]; channelName: string; onSave: (start: number, end: number) => boolean; onDelete: () => void }) {
+  const [start, setStart] = useState(formatTimelineTime(event.startMs)); const [end, setEnd] = useState(formatTimelineTime(event.endMs)); const [validation, setValidation] = useState<string | null>(null);
+  const submit = (formEvent: FormEvent) => { formEvent.preventDefault(); const startMs = parseTimelineTime(start); const endMs = parseTimelineTime(end); if (startMs === null || endMs === null) { setValidation('Enter time as MM:SS.mmm, HH:MM:SS.mmm, or milliseconds.'); return; } if (endMs <= startMs) { setValidation('The interval must end after it starts.'); return; } setValidation(null); onSave(startMs, endMs); };
+  return <aside className="inspector"><p className="panel-label">EVENT INSPECTOR</p><h2>Light Interval</h2><div className="property-readonly"><span>Channel</span><strong>{channelName}</strong></div><form onSubmit={submit}><label className="inspector-field"><span>Start</span><input aria-label="Start" value={start} onChange={e => setStart(e.target.value)}/></label><label className="inspector-field"><span>End</span><input aria-label="End" value={end} onChange={e => setEnd(e.target.value)}/></label>{validation && <p className="field-error" role="alert">{validation}</p>}<button className="button primary">Apply timing</button></form><div className="property-readonly event-duration"><span>Duration</span><strong>{formatTimelineTime(timelineTime(event.endMs - event.startMs))}</strong></div><button className="button danger" onClick={onDelete}>Delete Event</button><div className="stable-id"><span>Stable event ID</span><code>{event.id}</code></div></aside>;
 }
 
 function InspectorForm({ title, id, type, summary, fields }: { title: string; id: string; type?: string; summary?: string; fields: { label: string; value: string; inputMode?: 'numeric'; save: (value: string) => boolean }[] }) {
