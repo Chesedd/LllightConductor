@@ -1,0 +1,16 @@
+{
+  "name": "lllight-conductor-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "npm@11.4.2",
+  "scripts": {
+    "dev": "npm --workspace @lllight/desktop run dev",
+    "desktop:dev": "npm --workspace @lllight/desktop run tauri:dev",
+    "build": "npm --workspace @lllight/desktop run build",
+    "desktop:build": "npm --workspace @lllight/desktop run tauri:build",
+    "typecheck": "npm --workspace @lllight/desktop run typecheck",
+    "lint": "npm --workspace @lllight/desktop run lint",
+    "test": "npm --workspace @lllight/desktop run test"
+  },
+  "workspaces": ["apps/*"]
+}
