@@ -13,6 +13,17 @@ describe('desktop application shell', () => {
   it('starts with New, Open, and an empty recent-projects state', () => { render(<App />); expect(screen.getByRole('button', { name: 'New Project' })).toBeInTheDocument(); expect(screen.getByRole('button', { name: 'Open Project' })).toBeInTheDocument(); expect(screen.getByText('No recent projects')).toBeInTheDocument(); });
   it('creates an unsaved dirty project directly in Editor', async () => { render(<App />); await createProject(); expect(screen.getByRole('heading', { name: 'Editor', level: 1 })).toBeInTheDocument(); expect(screen.getByLabelText('Project toolbar')).toHaveTextContent('Aurora Show *'); });
   it('shows Save and Save As actions', async () => { render(<App />); await createProject(); expect(screen.getByRole('button', { name: /Save$/ })).toBeInTheDocument(); expect(screen.getByRole('button', { name: 'Save As' })).toBeInTheDocument(); expect(screen.getByText('Unsaved project')).toBeInTheDocument(); });
+  it('compiles without changing dirty/history state, summarizes, previews, and invalidates after an edit', async () => {
+    render(<App />); await createProject();
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Compile' }));
+    const summary = screen.getByRole('dialog'); expect(summary).toHaveTextContent('Compiled successfully'); expect(summary).toHaveTextContent('00:00.000'); expect(summary).toHaveTextContent('Masters0'); expect(screen.getByLabelText('Project toolbar')).toHaveTextContent('Aurora Show *'); expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
+    fireEvent.click(screen.getAllByRole('button', { name: 'View Runtime Score' }).at(-1)!);
+    expect(screen.getByLabelText('Runtime Score JSON')).toHaveTextContent('"version": 1'); fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.getByRole('button', { name: 'View Runtime Score' })).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Add Costume' })[0]); fireEvent.click(screen.getAllByRole('button', { name: 'Add Costume' }).at(-1)!);
+    expect(screen.queryByRole('button', { name: 'View Runtime Score' })).not.toBeInTheDocument();
+  });
   it('shows the editor empty state before a project is selected', () => { render(<App />); fireEvent.click(screen.getByRole('button', { name: 'Editor' })); expect(screen.getByText('No project open')).toBeInTheDocument(); });
   it('asks before leaving a dirty project and Cancel keeps it open', async () => { render(<App />); await createProject(); fireEvent.click(screen.getByRole('button', { name: 'Projects' })); expect(screen.getByRole('dialog')).toHaveTextContent('Unsaved changes'); fireEvent.click(screen.getByRole('button', { name: 'Cancel' })); expect(screen.getByLabelText('Aurora Show editor')).toBeInTheDocument(); });
   it("Don't Save closes a dirty project", async () => { render(<App />); await createProject(); fireEvent.click(screen.getByRole('button', { name: 'Projects' })); fireEvent.click(screen.getByRole('button', { name: "Don't Save" })); expect(await screen.findByText('No recent projects')).toBeInTheDocument(); });

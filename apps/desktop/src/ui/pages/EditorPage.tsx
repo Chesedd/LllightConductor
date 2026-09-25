@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { ChevronDown, ChevronRight, Copy, FolderKanban, Music, Pause, Play, Redo2, Save, Undo2, Upload } from 'lucide-react';
+import { Braces, ChevronDown, ChevronRight, Copy, FolderKanban, Music, Pause, Play, Redo2, Save, Undo2, Upload } from 'lucide-react';
 import { useAppState } from '../state/AppState';
 import { EmptyState } from '../components/EmptyState';
 import { ConfirmationDialog } from '../components/ConfirmationDialog';
@@ -51,13 +51,17 @@ export function EditorPage() {
 }
 
 export function EditorToolbar({ onDuplicate = () => {}, canDuplicate = false }: { onDuplicate?: () => void; canDuplicate?: boolean }) {
-  const { project, dirty, filePath, save, saveAs, audio, undo, redo, canUndo, canRedo } = useAppState();
+  const { project, dirty, filePath, save, saveAs, audio, undo, redo, canUndo, canRedo, compilation } = useAppState();
+  const [showSummary, setShowSummary] = useState(false); const [showArtifact, setShowArtifact] = useState(false);
   const canPlay = audio.transport.durationMs > 0 && audio.transport.status !== 'playing';
+  const compiled = compilation.result; const frames = compiled?.masters.reduce((sum, master) => sum + master.frames.length, 0) ?? 0; const transitions = compiled?.masters.reduce((sum, master) => sum + master.frames.reduce((inner, frame) => inner + frame.transitions.length, 0), 0) ?? 0;
   return <div className="editor-toolbar" aria-label="Project toolbar">
     <button className="transport" disabled={!canPlay} aria-label="Play" onClick={() => void audio.play()}><Play size={16}/></button><button className="transport" disabled={audio.transport.status !== 'playing'} aria-label="Pause" onClick={audio.pause}><Pause size={16}/></button><output className="time-display" aria-label="Playback time">{formatTimelineTime(audio.transport.currentTimeMs)} / {formatTimelineTime(audio.transport.durationMs)}</output>
     <button className="button secondary" aria-label="Undo" disabled={!canUndo} onClick={undo}><Undo2 size={15}/> Undo</button><button className="button secondary" aria-label="Redo" disabled={!canRedo} onClick={redo}><Redo2 size={15}/> Redo</button><button className="button secondary" disabled={!canDuplicate} onClick={onDuplicate}><Copy size={15}/> Duplicate</button>
     <div className="project-session"><strong>{project?.name}{dirty ? ' *' : ''}</strong><span title={filePath ?? undefined}>{filePath ?? 'Unsaved project'}</span></div><div className="toolbar-spacer"/>
-    <button className="button secondary" onClick={() => void save()}><Save size={15}/> Save</button><button className="button secondary" onClick={() => void saveAs()}>Save As</button><button className="button secondary" disabled><Upload size={15}/> Upload</button>
+    <button className="button secondary" onClick={() => void save()}><Save size={15}/> Save</button><button className="button secondary" onClick={() => void saveAs()}>Save As</button><button className="button primary" onClick={() => { if (compilation.compile()) setShowSummary(true); }}><Braces size={15}/> Compile</button>{compiled && <button className="button secondary" onClick={() => setShowArtifact(true)}>View Runtime Score</button>}<button className="button secondary" disabled><Upload size={15}/> Upload</button>
+    {showSummary && compiled && <div className="dialog-backdrop"><section className="dialog compile-dialog" role="dialog" aria-modal="true" aria-labelledby="compile-title"><h2 id="compile-title">Compiled successfully</h2><dl><div><dt>Duration</dt><dd>{formatTimelineTime(compiled.durationMs)}</dd></div><div><dt>Masters</dt><dd>{compiled.masters.length}</dd></div><div><dt>Frames</dt><dd>{frames}</dd></div><div><dt>Transitions</dt><dd>{transitions}</dd></div></dl><div className="dialog-actions"><button className="button secondary" onClick={() => { setShowSummary(false); setShowArtifact(true); }}>View Runtime Score</button><button className="button primary" onClick={() => setShowSummary(false)}>Done</button></div></section></div>}
+    {showArtifact && compiled && <div className="dialog-backdrop"><section className="dialog runtime-preview" role="dialog" aria-modal="true" aria-labelledby="runtime-title"><h2 id="runtime-title">Runtime Score v1</h2><p>Canonical diagnostic JSON. The compiled artifact is not saved in the project.</p><pre aria-label="Runtime Score JSON">{compilation.serialized()}</pre><div className="dialog-actions"><button className="button primary" onClick={() => setShowArtifact(false)}>Close</button></div></section></div>}
   </div>;
 }
 
