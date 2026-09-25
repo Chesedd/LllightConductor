@@ -1,26 +1,33 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { ChevronDown, ChevronRight, FolderKanban, Music, Pause, Play, Save, Upload } from 'lucide-react';
+import { ChevronDown, ChevronRight, Copy, FolderKanban, Music, Pause, Play, Redo2, Save, Undo2, Upload } from 'lucide-react';
 import { useAppState } from '../state/AppState';
 import { EmptyState } from '../components/EmptyState';
 import { ConfirmationDialog } from '../components/ConfirmationDialog';
 import type { ChannelId, ControllerId, CostumeId, EntityId, Project } from '../../domain/project';
 import { formatTimelineTime, parseTimelineTime, timelineTime } from '../../domain/timelineTime';
 import { TimelineSurface } from '../components/TimelineSurface';
+import { isEditableTarget } from '../keyboard';
+import { snapTime } from '../../timeline/snapping';
 
 type Selection = { kind: 'costume'; id: CostumeId } | { kind: 'master' | 'pico'; id: ControllerId } | { kind: 'channel'; id: ChannelId };
 type CreateRequest = { kind: 'costume' } | { kind: 'pico'; parentId: ControllerId } | { kind: 'channel'; parentId: ControllerId };
 type DeleteRequest = { selection: Selection; name: string };
+type ScoreClipboard = { events: { channelId: ChannelId; startMs: number; endMs: number }[]; anchorTimeMs: number };
 
 export function EditorPage() {
-  const { project, navigate, topology, audio, score } = useAppState();
+  const app = useAppState(); const { project, navigate, topology, audio, score } = app;
   const [selection, setSelection] = useState<Selection | null>(null);
   const [createRequest, setCreateRequest] = useState<CreateRequest | null>(null);
   const [deleteRequest, setDeleteRequest] = useState<DeleteRequest | null>(null);
   const [removeAudioRequested, setRemoveAudioRequested] = useState(false);
-  const [selectedScoreEventId, setSelectedScoreEventId] = useState<EntityId | null>(null);
-  useEffect(() => { setSelection(null); setSelectedScoreEventId(null); }, [project?.id]);
-  useEffect(() => { if (selectedScoreEventId && !project?.score.events.some(event => event.id === selectedScoreEventId)) setSelectedScoreEventId(null); }, [project, selectedScoreEventId]);
-  useEffect(() => { const key = (event: KeyboardEvent) => { if (event.key === 'Escape') setSelectedScoreEventId(null); if ((event.key === 'Delete' || event.key === 'Backspace') && selectedScoreEventId && !(event.target instanceof HTMLInputElement)) { event.preventDefault(); if (score.remove(selectedScoreEventId)) setSelectedScoreEventId(null); } }; window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key); }, [score, selectedScoreEventId]);
+  const [selectedScoreEventIds, setSelectedScoreEventIds] = useState<Set<EntityId>>(new Set());
+  const [clipboard, setClipboard] = useState<ScoreClipboard | null>(null); const [snapEnabled, setSnapEnabled] = useState(true); const [gridMs, setGridMs] = useState(100);
+  useEffect(() => { setSelection(null); setSelectedScoreEventIds(new Set()); setClipboard(null); }, [project?.id]);
+  useEffect(() => { const existing = new Set(project?.score.events.map(event => event.id)); setSelectedScoreEventIds(current => new Set([...current].filter(id => existing.has(id)))); }, [project]);
+  const copy = () => { const events = project?.score.events.filter(event => selectedScoreEventIds.has(event.id)) ?? []; if (!events.length) return; const anchorTimeMs = Math.min(...events.map(event => event.startMs)); setClipboard({ anchorTimeMs, events: events.map(({ channelId, startMs, endMs }) => ({ channelId, startMs, endMs })) }); };
+  const pasteAt = (anchor: number) => { if (!clipboard) return; const destination = snapEnabled ? snapTime(anchor, gridMs) : Math.max(0, anchor); const offset = destination - clipboard.anchorTimeMs; const ids = score.addMany(clipboard.events.map(event => ({ ...event, startMs: event.startMs + offset, endMs: event.endMs + offset }))); if (ids) setSelectedScoreEventIds(new Set(ids)); };
+  const duplicate = () => { const events = project?.score.events.filter(event => selectedScoreEventIds.has(event.id)) ?? []; if (!events.length) return; const offset = snapEnabled ? gridMs : 100; const ids = score.addMany(events.map(({ channelId, startMs, endMs }) => ({ channelId, startMs: startMs + offset, endMs: endMs + offset }))); if (ids) setSelectedScoreEventIds(new Set(ids)); };
+  useEffect(() => { const key = (event: KeyboardEvent) => { if (isEditableTarget(event.target)) return; const modifier = event.ctrlKey || event.metaKey; const lower = event.key.toLowerCase(); if (modifier && lower === 'z') { event.preventDefault(); if (event.shiftKey) app.redo(); else app.undo(); return; } if (modifier && lower === 'y') { event.preventDefault(); app.redo(); return; } if (modifier && lower === 'c') { event.preventDefault(); copy(); return; } if (modifier && lower === 'v') { event.preventDefault(); pasteAt(audio.transport.currentTimeMs); return; } if (modifier && lower === 'd') { event.preventDefault(); duplicate(); return; } if (event.key === 'Escape') setSelectedScoreEventIds(new Set()); if ((event.key === 'Delete' || event.key === 'Backspace') && selectedScoreEventIds.size) { event.preventDefault(); if (score.removeMany([...selectedScoreEventIds])) setSelectedScoreEventIds(new Set()); } }; window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key); });
   if (!project) return <section className="page-content"><EmptyState icon={<FolderKanban size={28}/>} title="No project open" description="Open a project before entering the editor." action={<button className="button primary" onClick={() => navigate('Projects')}>Back to Projects</button>} /></section>;
 
   const deleteEntity = () => {
@@ -31,11 +38,11 @@ export function EditorPage() {
     setDeleteRequest(null);
   };
   return <section className="editor" aria-label={`${project.name} editor`}>
-    <EditorToolbar />
+    <EditorToolbar onDuplicate={duplicate} canDuplicate={selectedScoreEventIds.size > 0} />
     <div className="editor-body">
       <ProjectTree project={project} selection={selection} onSelect={setSelection} onCreate={setCreateRequest} onDelete={(item, name) => setDeleteRequest({ selection: item, name })} />
-      <div className="timeline-column"><AudioPanel onRemove={() => setRemoveAudioRequested(true)}/><TimelineSurface projectId={project.id} selectedEventId={selectedScoreEventId} onSelectEvent={id => { setSelectedScoreEventId(id); if (id) setSelection(null); }}/></div>
-      <Inspector project={project} selection={selection} selectedEventId={selectedScoreEventId} onDeleted={() => setSelectedScoreEventId(null)} />
+      <div className="timeline-column"><AudioPanel onRemove={() => setRemoveAudioRequested(true)}/><TimelineSurface projectId={project.id} selectedEventIds={selectedScoreEventIds} onSelectEvents={ids => { setSelectedScoreEventIds(ids); if (ids.size) setSelection(null); }} snapEnabled={snapEnabled} gridMs={gridMs} onSnapEnabled={setSnapEnabled} onGridMs={setGridMs}/></div>
+      <Inspector project={project} selection={selection} selectedEventIds={selectedScoreEventIds} onDeleted={() => setSelectedScoreEventIds(new Set())} />
     </div>
     {createRequest && <CreateDialog request={createRequest} costumeNumber={project.costumes.length + 1} onClose={() => setCreateRequest(null)} />}
     {deleteRequest && <ConfirmationDialog title={`Delete ${labelFor(deleteRequest.selection)} “${deleteRequest.name}”?`} description="This also removes its child topology and cannot be undone." confirmLabel="Delete" danger onCancel={() => setDeleteRequest(null)} onConfirm={deleteEntity} />}
@@ -43,11 +50,12 @@ export function EditorPage() {
   </section>;
 }
 
-export function EditorToolbar() {
-  const { project, dirty, filePath, save, saveAs, audio } = useAppState();
-  const canPlay = audio.availability === 'ready' && audio.transport.status !== 'playing';
+export function EditorToolbar({ onDuplicate = () => {}, canDuplicate = false }: { onDuplicate?: () => void; canDuplicate?: boolean }) {
+  const { project, dirty, filePath, save, saveAs, audio, undo, redo, canUndo, canRedo } = useAppState();
+  const canPlay = audio.transport.durationMs > 0 && audio.transport.status !== 'playing';
   return <div className="editor-toolbar" aria-label="Project toolbar">
     <button className="transport" disabled={!canPlay} aria-label="Play" onClick={() => void audio.play()}><Play size={16}/></button><button className="transport" disabled={audio.transport.status !== 'playing'} aria-label="Pause" onClick={audio.pause}><Pause size={16}/></button><output className="time-display" aria-label="Playback time">{formatTimelineTime(audio.transport.currentTimeMs)} / {formatTimelineTime(audio.transport.durationMs)}</output>
+    <button className="button secondary" aria-label="Undo" disabled={!canUndo} onClick={undo}><Undo2 size={15}/> Undo</button><button className="button secondary" aria-label="Redo" disabled={!canRedo} onClick={redo}><Redo2 size={15}/> Redo</button><button className="button secondary" disabled={!canDuplicate} onClick={onDuplicate}><Copy size={15}/> Duplicate</button>
     <div className="project-session"><strong>{project?.name}{dirty ? ' *' : ''}</strong><span title={filePath ?? undefined}>{filePath ?? 'Unsaved project'}</span></div><div className="toolbar-spacer"/>
     <button className="button secondary" onClick={() => void save()}><Save size={15}/> Save</button><button className="button secondary" onClick={() => void saveAs()}>Save As</button><button className="button secondary" disabled><Upload size={15}/> Upload</button>
   </div>;
@@ -96,9 +104,11 @@ function CreateDialog({ request, costumeNumber, onClose }: { request: CreateRequ
   return <div className="dialog-backdrop"><form className="dialog" role="dialog" aria-modal="true" aria-labelledby="create-title" onSubmit={submit}><h2 id="create-title">Add {kind === 'costume' ? 'Costume' : kind === 'pico' ? 'Pico' : 'Channel'}</h2><label htmlFor="new-name">Display name</label><input id="new-name" autoFocus value={name} onChange={event => setName(event.target.value)}/>{kind === 'channel' && <><label htmlFor="new-output">Hardware output identifier</label><input id="new-output" placeholder="GP0, OUT1, CH3…" value={output} onChange={event => setOutput(event.target.value)}/></>}<div className="dialog-actions"><button type="button" className="button secondary" onClick={onClose}>Cancel</button><button className="button primary">Add {kind === 'costume' ? 'Costume' : kind === 'pico' ? 'Pico' : 'Channel'}</button></div></form></div>;
 }
 
-function Inspector({ project, selection, selectedEventId, onDeleted }: { project: Project; selection: Selection | null; selectedEventId: EntityId | null; onDeleted: () => void }) {
+function Inspector({ project, selection, selectedEventIds, onDeleted }: { project: Project; selection: Selection | null; selectedEventIds: ReadonlySet<EntityId>; onDeleted: () => void }) {
   const { topology, score } = useAppState();
-  const scoreEvent = project.score.events.find(event => event.id === selectedEventId);
+  const selectedEvents = project.score.events.filter(event => selectedEventIds.has(event.id));
+  if (selectedEvents.length > 1) { const channels = new Map(project.costumes.flatMap(costume => costume.master.slaves).flatMap(pico => pico.channels).map(channel => [channel.id, channel.displayName])); return <aside className="inspector"><p className="panel-label">EVENT INSPECTOR</p><h2>{selectedEvents.length} intervals selected</h2><div className="property-readonly"><span>Channels</span><strong>{[...new Set(selectedEvents.map(event => channels.get(event.channelId) ?? event.channelId))].join(', ')}</strong></div><div className="property-readonly"><span>Earliest start</span><strong>{formatTimelineTime(Math.min(...selectedEvents.map(event => event.startMs)))}</strong></div><div className="property-readonly"><span>Latest end</span><strong>{formatTimelineTime(Math.max(...selectedEvents.map(event => event.endMs)))}</strong></div><button className="button danger" onClick={() => { if (score.removeMany([...selectedEventIds])) onDeleted(); }}>Delete Intervals</button></aside>; }
+  const scoreEvent = selectedEvents[0];
   if (scoreEvent) { const channel = project.costumes.flatMap(costume => costume.master.slaves).flatMap(pico => pico.channels).find(value => value.id === scoreEvent.channelId); return <ScoreEventInspector key={scoreEvent.id} event={scoreEvent} channelName={channel?.displayName ?? 'Unknown channel'} onSave={(startMs, endMs) => score.resize(scoreEvent.id, { startMs, endMs })} onDelete={() => { if (score.remove(scoreEvent.id)) onDeleted(); }}/>; }
   if (!selection) return <aside className="inspector"><p className="panel-label">INSPECTOR</p><div className="inspector-empty"><strong>No selection</strong><p>Select a costume, controller, or channel to edit its properties.</p></div></aside>;
   for (const costume of project.costumes) {

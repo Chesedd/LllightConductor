@@ -31,6 +31,15 @@ function validateAttempt(project: Project, candidate: LightInterval, ignoredId?:
   if (conflict) throw new ScoreOperationError('overlap', 'Interval overlaps another event on the same channel.', { channelId: candidate.channelId, conflictingEventId: conflict.id, attemptedInterval });
 }
 
+function validateBatch(project: Project, candidates: readonly LightInterval[], ignoredIds: ReadonlySet<EntityId>): void {
+  const base = project.score.events.filter(event => !ignoredIds.has(event.id));
+  const staged: LightInterval[] = [];
+  for (const candidate of candidates) {
+    validateAttempt({ ...project, score: { ...project.score, events: [...base, ...staged] } }, candidate);
+    staged.push(candidate);
+  }
+}
+
 function replace(project: Project, event: LightInterval, at: Timestamp): Project {
   const result: Project = { ...project, updatedAt: timestamp(at), score: { ...project.score, events: orderScoreEvents(project.score.events.map(value => value.id === event.id ? event : value)) } };
   assertValidProject(result);
@@ -50,6 +59,30 @@ export function removeScoreEvent(project: Project, eventId: EntityId, at: Timest
   const result: Project = { ...project, updatedAt: timestamp(at), score: { ...project.score, events: project.score.events.filter(event => event.id !== eventId) } };
   assertValidProject(result);
   return result;
+}
+
+export function removeScoreEvents(project: Project, eventIds: readonly EntityId[], at: Timestamp): Project {
+  const ids = new Set(eventIds);
+  if (!ids.size || [...ids].some(id => !project.score.events.some(event => event.id === id))) throw new ScoreOperationError('event-not-found', 'Score event does not exist.');
+  const result: Project = { ...project, updatedAt: timestamp(at), score: { ...project.score, events: project.score.events.filter(event => !ids.has(event.id)) } };
+  assertValidProject(result); return result;
+}
+
+export function moveScoreEvents(project: Project, eventIds: readonly EntityId[], deltaMs: TimelineTimeMs, at: Timestamp): Project {
+  const ids = new Set(eventIds); const selected = project.score.events.filter(event => ids.has(event.id));
+  if (!ids.size || selected.length !== ids.size) throw new ScoreOperationError('event-not-found', 'Score event does not exist.');
+  const candidates = selected.map(event => ({ ...event, startMs: event.startMs + deltaMs as TimelineTimeMs, endMs: event.endMs + deltaMs as TimelineTimeMs }));
+  validateBatch(project, candidates, ids);
+  const replacements = new Map(candidates.map(event => [event.id, event]));
+  const result: Project = { ...project, updatedAt: timestamp(at), score: { ...project.score, events: orderScoreEvents(project.score.events.map(event => replacements.get(event.id) ?? event)) } };
+  assertValidProject(result); return result;
+}
+
+export function addScoreEvents(project: Project, inputs: readonly Omit<LightInterval, 'id' | 'kind'>[], createId: IdGenerator, at: Timestamp): { project: Project; eventIds: EntityId[] } {
+  const events: LightInterval[] = inputs.map(input => ({ id: createId(), kind: 'light-interval', ...input }));
+  validateBatch(project, events, new Set());
+  const result: Project = { ...project, updatedAt: timestamp(at), score: { ...project.score, events: orderScoreEvents([...project.score.events, ...events]) } };
+  assertValidProject(result); return { project: result, eventIds: events.map(event => event.id) };
 }
 
 export function moveLightInterval(project: Project, eventId: EntityId, startMs: TimelineTimeMs, at: Timestamp): Project {
