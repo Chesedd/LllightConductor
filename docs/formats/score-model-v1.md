@@ -4,7 +4,7 @@
 
 Score v1 is the authoring model for a whole project's shared show timeline. It records lighting intent, not runtime or hardware commands. GPIO levels, ON/OFF transitions, UART packets, ESP32 commands, Pico addresses, and compiler output do not belong here. A later compiler may derive those artifacts.
 
-Score model versioning is independent from `.lightshow` file `schemaVersion`: the current file is V2 while the embedded score is V1.
+Score model versioning is independent from `.lightshow` file `schemaVersion`: the current file is V3 while the embedded score is V1.
 
 ```ts
 type Score = { version: 1; events: ScoreEvent[] };

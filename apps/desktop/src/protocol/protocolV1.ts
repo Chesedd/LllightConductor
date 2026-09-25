@@ -5,6 +5,8 @@ export const FRAME_MAGIC = new Uint8Array([0xa5, 0x5a]);
 export const FRAME_HEADER_SIZE = 13;
 export const FRAME_CRC_SIZE = 2;
 export const MAX_PAYLOAD_SIZE = 64;
+/** One count byte plus two bytes per SET_OUTPUTS update. */
+export const MAX_SET_OUTPUT_UPDATES = Math.floor((MAX_PAYLOAD_SIZE - 1) / 2);
 export const BROADCAST_ADDRESS = 255;
 
 export enum MessageType { HELLO = 0x01, HELLO_ACK = 0x02, PING = 0x03, PONG = 0x04, RESET_OUTPUTS = 0x05, SET_OUTPUTS = 0x06, ACK = 0x07, NACK = 0x08, GET_STATUS = 0x09, STATUS = 0x0a }
@@ -49,7 +51,7 @@ export const hello = (slaveAddress: number, sequence: number, sessionId: number)
 export function helloAck(slaveAddress: number, sequence: number, sessionId: number, firmwareId: number, capabilities: number, configuredOutputs: number): ProtocolFrame { const { payload, view } = payloadView(5); view.setUint16(0, uint16(firmwareId, 'firmwareId'), true); view.setUint16(2, uint16(capabilities, 'capabilities'), true); view.setUint8(4, uint8(configuredOutputs, 'configuredOutputs')); return frame(MessageType.HELLO_ACK, slaveAddress, sequence, sessionId, payload); }
 export function ping(slaveAddress: number, sequence: number, sessionId: number, token: number, response = false): ProtocolFrame { const { payload, view } = payloadView(4); view.setUint32(0, uint32(token, 'token'), true); return frame(response ? MessageType.PONG : MessageType.PING, slaveAddress, sequence, sessionId, payload); }
 export const resetOutputs = (slaveAddress: number, sequence: number, sessionId: number) => frame(MessageType.RESET_OUTPUTS, slaveAddress, sequence, sessionId);
-export function setOutputs(slaveAddress: number, sequence: number, sessionId: number, updates: readonly OutputUpdate[]): ProtocolFrame { if (updates.length < 1 || updates.length > 31) throw new ProtocolCodecError('invalid-payload', 'SET_OUTPUTS requires 1..31 updates.'); const payload = new Uint8Array(1 + updates.length * 2); payload[0] = updates.length; updates.forEach((update, index) => { payload[1 + index * 2] = uint8(update.outputId, 'outputId'); if (update.state !== 0 && update.state !== 1) throw new ProtocolCodecError('invalid-payload', 'Output state must be 0 or 1.'); payload[2 + index * 2] = update.state; }); return frame(MessageType.SET_OUTPUTS, slaveAddress, sequence, sessionId, payload); }
+export function setOutputs(slaveAddress: number, sequence: number, sessionId: number, updates: readonly OutputUpdate[]): ProtocolFrame { if (updates.length < 1 || updates.length > MAX_SET_OUTPUT_UPDATES) throw new ProtocolCodecError('invalid-payload', `SET_OUTPUTS requires 1..${MAX_SET_OUTPUT_UPDATES} updates.`); const payload = new Uint8Array(1 + updates.length * 2); payload[0] = updates.length; updates.forEach((update, index) => { payload[1 + index * 2] = uint8(update.outputId, 'outputId'); if (update.state !== 0 && update.state !== 1) throw new ProtocolCodecError('invalid-payload', 'Output state must be 0 or 1.'); payload[2 + index * 2] = update.state; }); return frame(MessageType.SET_OUTPUTS, slaveAddress, sequence, sessionId, payload); }
 export const ack = (request: ProtocolFrame) => frame(MessageType.ACK, request.slaveAddress, request.sequence, request.sessionId);
 export const nack = (request: ProtocolFrame, code: NackCode) => frame(MessageType.NACK, request.slaveAddress, request.sequence, request.sessionId, new Uint8Array([code]));
 export const getStatus = (slaveAddress: number, sequence: number, sessionId: number) => frame(MessageType.GET_STATUS, slaveAddress, sequence, sessionId);
@@ -57,7 +59,7 @@ export function status(slaveAddress: number, sequence: number, sessionId: number
 export const incrementSequence = (sequence: number) => (uint16(sequence, 'sequence') + 1) & 0xffff;
 
 export function parseOutputUpdates(payload: Uint8Array): OutputUpdate[] {
-  if (payload.length < 3 || payload[0] < 1 || payload[0] > 31 || payload.length !== 1 + payload[0] * 2) throw new ProtocolCodecError('invalid-payload', 'Malformed SET_OUTPUTS payload.');
+  if (payload.length < 3 || payload[0] < 1 || payload[0] > MAX_SET_OUTPUT_UPDATES || payload.length !== 1 + payload[0] * 2) throw new ProtocolCodecError('invalid-payload', 'Malformed SET_OUTPUTS payload.');
   const seen = new Set<number>(); const result: OutputUpdate[] = [];
   for (let offset = 1; offset < payload.length; offset += 2) { const outputId = payload[offset]; const state = payload[offset + 1]; if (state !== 0 && state !== 1) throw new ProtocolCodecError('invalid-payload', 'Output state must be 0 or 1.'); if (seen.has(outputId)) throw new ProtocolCodecError('invalid-payload', 'A batch cannot contain an output twice.'); seen.add(outputId); result.push({ outputId, state }); }
   return result;

@@ -7,7 +7,7 @@ describe('ProjectService', () => {
     const repository = new InMemoryProjectRepository();
     const service = new ProjectService(repository, () => new Date('2026-01-02T03:04:05Z'), () => 'project-1');
     const project = await service.createProject('  Opening Show  ');
-    expect(project).toMatchObject({ schemaVersion: 2, id: 'project-1', name: 'Opening Show', costumes: [], audio: null, score: { version: 1, events: [] }, deviceBindings: [] });
+    expect(project).toMatchObject({ schemaVersion: 3, id: 'project-1', name: 'Opening Show', costumes: [], audio: null, score: { version: 1, events: [] }, deviceBindings: [] });
     await expect(service.listProjects()).resolves.toEqual([{ id: 'project-1', name: 'Opening Show', updatedAt: '2026-01-02T03:04:05.000Z' }]);
   });
   it('rejects an empty project name', async () => {

@@ -1,7 +1,7 @@
 import type { Score } from '../score/score';
 import type { TimelineTimeMs } from './timelineTime';
 
-export const CURRENT_PROJECT_SCHEMA_VERSION = 2 as const;
+export const CURRENT_PROJECT_SCHEMA_VERSION = 3 as const;
 
 export type EntityId = string;
 export type ProjectId = EntityId;
@@ -19,6 +19,8 @@ export interface OutputChannel {
   type: OutputChannelType;
   /** Opaque identifier meaningful to this slave (for example, an output label). */
   hardwareOutputIdentifier: string;
+  /** Explicit uint8 identifier sent to this Pico by Protocol v1. */
+  protocolOutputId?: number;
 }
 
 export interface SlaveController {

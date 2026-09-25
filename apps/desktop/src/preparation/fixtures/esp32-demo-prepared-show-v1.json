@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "masters": [
+    {
+      "masterId": "master",
+      "costumeId": "costume",
+      "durationMs": 2500,
+      "frames": [
+        { "timeMs": 0, "slaveBatches": [{ "slaveAddress": 7, "updates": [{ "outputId": 0, "state": "ON" }] }] },
+        { "timeMs": 500, "slaveBatches": [{ "slaveAddress": 7, "updates": [{ "outputId": 1, "state": "ON" }] }] },
+        { "timeMs": 1000, "slaveBatches": [{ "slaveAddress": 7, "updates": [{ "outputId": 0, "state": "OFF" }, { "outputId": 2, "state": "ON" }] }] },
+        { "timeMs": 1500, "slaveBatches": [{ "slaveAddress": 7, "updates": [{ "outputId": 1, "state": "OFF" }, { "outputId": 2, "state": "OFF" }] }] },
+        { "timeMs": 2000, "slaveBatches": [{ "slaveAddress": 7, "updates": [{ "outputId": 3, "state": "ON" }] }] },
+        { "timeMs": 2500, "slaveBatches": [{ "slaveAddress": 7, "updates": [{ "outputId": 3, "state": "OFF" }] }] }
+      ]
+    }
+  ]
+}
