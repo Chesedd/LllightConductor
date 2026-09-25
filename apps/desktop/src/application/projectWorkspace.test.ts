@@ -1,0 +1,21 @@
+import { describe, expect, it } from 'vitest';
+import type { Project } from '../domain/project';
+import { ProjectFileService, type ProjectFileGateway } from '../persistence/projectFileService';
+import { serializeProjectFile } from '../persistence/projectFile';
+import { InMemoryRecentProjectsRepository } from '../persistence/recentProjectsRepository';
+import { ProjectWorkspace, type UnsavedDecision } from './projectWorkspace';
+
+const project = (name = 'Show'): Project => ({ schemaVersion: 1, id: 'project', name, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', audio: null, costumes: [], score: { format: 'provisional', version: 1 }, deviceBindings: [] });
+class FakeGateway implements ProjectFileGateway { openPath: string | null = null; savePath: string | null = null; files = new Map<string, string>(); writes: string[] = []; async chooseOpenPath() { return this.openPath; } async chooseSavePath() { return this.savePath; } async readText(path: string) { const value = this.files.get(path); if (!value) throw new Error('File not found'); return value; } async atomicWriteText(path: string, contents: string) { this.files.set(path, contents); this.writes.push(path); } }
+const setup = () => { const gateway = new FakeGateway(); const recent = new InMemoryRecentProjectsRepository(); const workspace = new ProjectWorkspace(new ProjectFileService(gateway), recent, () => new Date('2026-03-01T00:00:00Z')); return { gateway, recent, workspace }; };
+const decision = (value: UnsavedDecision) => async () => value;
+
+describe('ProjectWorkspace save and session semantics', () => {
+  it('first Save uses Save As and cancellation is not success', async () => { const { workspace, gateway } = setup(); workspace.setNewProject(project()); expect(await workspace.save()).toBe(false); expect(workspace.snapshot()).toMatchObject({ dirty: true, filePath: null }); gateway.savePath = '/show.lightshow'; expect(await workspace.save()).toBe(true); expect(gateway.writes).toEqual(['/show.lightshow']); });
+  it('saves an existing project to the same path and becomes clean', async () => { const { workspace, gateway } = setup(); gateway.savePath = '/show.lightshow'; workspace.setNewProject(project()); await workspace.save(); workspace.replaceProject(project('Edited')); expect(workspace.snapshot().dirty).toBe(true); await workspace.save(); expect(gateway.writes).toEqual(['/show.lightshow', '/show.lightshow']); expect(workspace.snapshot().dirty).toBe(false); });
+  it('marks a domain edit dirty', () => { const { workspace } = setup(); workspace.setNewProject(project()); expect(workspace.snapshot().dirty).toBe(true); });
+  it('Cancel keeps the current dirty project open', async () => { const { workspace } = setup(); workspace.setNewProject(project()); expect(await workspace.newProject(() => project('Other'), decision('cancel'))).toBe(false); expect(workspace.snapshot().project?.name).toBe('Show'); });
+  it("Don't Save performs the pending action", async () => { const { workspace } = setup(); workspace.setNewProject(project()); expect(await workspace.newProject(() => project('Other'), decision('discard'))).toBe(true); expect(workspace.snapshot().project?.name).toBe('Other'); });
+  it('Save performs the action only after successful persistence', async () => { const { workspace, gateway } = setup(); workspace.setNewProject(project()); expect(await workspace.newProject(() => project('Other'), decision('save'))).toBe(false); expect(workspace.snapshot().project?.name).toBe('Show'); gateway.savePath = '/show.lightshow'; expect(await workspace.newProject(() => project('Other'), decision('save'))).toBe(true); expect(workspace.snapshot().project?.name).toBe('Other'); });
+  it('opens files and maintains removable recent metadata', async () => { const { workspace, gateway } = setup(); gateway.files.set('/old.lightshow', serializeProjectFile(project('Recent'))); await workspace.openRecent('/old.lightshow', decision('discard')); expect(workspace.snapshot().recentProjects[0]).toMatchObject({ path: '/old.lightshow', displayName: 'Recent', lastOpenedAt: '2026-03-01T00:00:00.000Z' }); await workspace.removeRecent('/old.lightshow'); expect(workspace.snapshot().recentProjects).toEqual([]); });
+});
