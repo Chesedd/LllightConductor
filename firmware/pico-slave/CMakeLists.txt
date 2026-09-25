@@ -1,0 +1,30 @@
+cmake_minimum_required(VERSION 3.13)
+
+if(PICO_SLAVE_HOST_TESTS)
+  project(pico_slave_host_tests LANGUAGES CXX)
+  enable_testing()
+  add_library(pico_slave_core src/protocol.cpp src/stream_parser.cpp src/command_processor.cpp)
+  target_include_directories(pico_slave_core PUBLIC include)
+  target_compile_features(pico_slave_core PUBLIC cxx_std_17)
+  target_compile_options(pico_slave_core PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_executable(pico_slave_tests host-tests/tests.cpp)
+  target_link_libraries(pico_slave_tests PRIVATE pico_slave_core)
+  target_compile_options(pico_slave_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME pico_slave_tests COMMAND pico_slave_tests)
+  return()
+endif()
+
+include(pico_sdk_import.cmake)
+project(pico_slave C CXX ASM)
+pico_sdk_init()
+
+add_executable(pico_slave
+  src/main.cpp src/pico_output_controller.cpp src/protocol.cpp
+  src/stream_parser.cpp src/command_processor.cpp)
+target_include_directories(pico_slave PRIVATE include src)
+target_compile_features(pico_slave PRIVATE cxx_std_17)
+target_compile_definitions(pico_slave PRIVATE PICO_SLAVE_DEBUG=0)
+target_link_libraries(pico_slave PRIVATE pico_stdlib hardware_uart hardware_gpio)
+pico_enable_stdio_usb(pico_slave 1)
+pico_enable_stdio_uart(pico_slave 0)
+pico_add_extra_outputs(pico_slave)
