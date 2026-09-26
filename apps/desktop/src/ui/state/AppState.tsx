@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createStableId, type ChannelId, type ControllerId, type CostumeId, type EntityId, type Project } from '../../domain/project';
-import { addChannel, addCostume, addSlave, autoAssignChannelProtocolOutputIds, changeChannelHardwareOutputIdentifier, changeSlaveLogicalAddress, removeChannel, removeCostume, removeSlave, renameChannel, renameCostume, renameMaster, renameSlave, reorderChannels, reorderCostumes, reorderSlaves, setChannelProtocolOutputId } from '../../domain/projectOperations';
+import { addChannel, addCostume, addSlave, autoAssignChannelProtocolOutputIds, bindEsp32, changeChannelHardwareOutputIdentifier, changeSlaveLogicalAddress, removeChannel, removeCostume, removeSlave, renameChannel, renameCostume, renameMaster, renameSlave, reorderChannels, reorderCostumes, reorderSlaves, setChannelProtocolOutputId, unbindEsp32 } from '../../domain/projectOperations';
 import { ProjectService } from '../../application/projectService';
 import { ProjectWorkspace, type UnsavedDecision, type WorkspaceSnapshot } from '../../application/projectWorkspace';
 import { InMemoryProjectRepository } from '../../persistence/projectRepository';
@@ -15,6 +15,8 @@ import { compileProject, ScoreCompilerError, serializeCompiledShow } from '../..
 import type { CompiledShowV1 } from '../../runtime/runtimeScore';
 import { PreparationError, prepareCompiledShow, serializePreparedShow } from '../../preparation/prepareCompiledShow';
 import type { PreparedShowBundleV1 } from '../../preparation/preparedShow';
+import { DesktopEsp32Connection } from '../../desktopEsp32/connection';
+import { TauriSerialPortGateway, type SerialPortDescriptor } from '../../desktopEsp32/transport';
 
 export type Section = 'Projects' | 'Editor' | 'Devices' | 'Settings';
 interface AppStateValue extends WorkspaceSnapshot {
@@ -25,6 +27,7 @@ interface AppStateValue extends WorkspaceSnapshot {
   compilation: { result: CompiledShowV1 | null; compile: () => boolean; clear: () => void; serialized: () => string | null };
   preparation: { result: PreparedShowBundleV1 | null; prepare: () => boolean; serialized: () => string | null };
   undo: () => boolean; redo: () => boolean;
+  hardware:{connection:DesktopEsp32Connection;ports:SerialPortDescriptor[];revision:number;refreshPorts:()=>Promise<void>;connect:(port:string)=>Promise<void>;disconnect:()=>Promise<void>;refreshStatus:()=>Promise<void>;bind:(masterId:ControllerId)=>boolean;unbind:(masterId:ControllerId)=>boolean;upload:(masterId:ControllerId)=>Promise<void>;cancelUpload:()=>Promise<void>;start:()=>Promise<void>;stop:()=>Promise<void>};
   audio: {
     availability: 'none' | 'loading' | 'ready' | 'missing' | 'error'; transport: PlaybackState;
     waveform: { status: 'idle' | 'loading' | 'ready' | 'error'; data: WaveformData | null; error: string | null };
@@ -46,6 +49,7 @@ export function AppStateProvider({ children, workspace: supplied, playback: supp
   const [snapshot, setSnapshot] = useState(workspace.snapshot()); const [section, setSection] = useState<Section>('Projects'); const [error, setError] = useState<string | null>(null);
   const [compiled, setCompiled] = useState<CompiledShowV1 | null>(null);
   const [prepared, setPrepared] = useState<PreparedShowBundleV1 | null>(null);
+  const connection=useMemo(()=>new DesktopEsp32Connection(new TauriSerialPortGateway()),[]);const [ports,setPorts]=useState<SerialPortDescriptor[]>([]);const [hardwareRevision,setHardwareRevision]=useState(0);const hardwareSync=()=>setHardwareRevision(v=>v+1);
   const playback = useMemo(() => suppliedPlayback ?? new AudioPlaybackController(new HtmlAudioPlaybackAdapter()), [suppliedPlayback]);
   const media = useMemo(() => suppliedMedia ?? new AudioMediaService(new TauriAudioMediaGateway()), [suppliedMedia]);
   const waveformExtractor = useMemo(() => suppliedExtractor ?? new WebAudioWaveformExtractor(), [suppliedExtractor]);
@@ -64,6 +68,7 @@ export function AppStateProvider({ children, workspace: supplied, playback: supp
   useEffect(() => { void run(() => workspace.initialize()); }, [workspace]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => playback.subscribe(setTransport), [playback]);
   useEffect(() => { setCompiled(null); setPrepared(null); }, [snapshot.project?.id]);
+  useEffect(()=>()=>{void connection.disconnect();},[connection]);
   const audioReference = snapshot.project?.audio?.reference;
   useEffect(() => {
     let current = true; const referenceKey = audioReference ? JSON.stringify(audioReference) : null; const alreadyLoaded = referenceKey !== null && preloadedAudio.current === referenceKey; preloadedAudio.current = null; if (!alreadyLoaded) playback.unload(); setWaveform({ status: audioReference ? 'loading' : 'idle', data: null, error: null });
@@ -86,6 +91,7 @@ export function AppStateProvider({ children, workspace: supplied, playback: supp
     save: () => run(() => workspace.save()), saveAs: () => run(() => workspace.saveAs()), updateProject: project => { workspace.replaceProject(project); invalidate(); sync(); }, undo: () => { playback.pause(); return workspaceAction(() => workspace.undo()) ?? false; }, redo: () => { playback.pause(); return workspaceAction(() => workspace.redo()) ?? false; },
     compilation: { result: compiled, compile: () => { if (!snapshot.project) return false; try { setError(null); setPrepared(null); setCompiled(compileProject(snapshot.project)); return true; } catch (cause) { setCompiled(null); setPrepared(null); setError(compilerFriendlyError(cause)); return false; } }, clear: () => { setCompiled(null); setPrepared(null); }, serialized: () => compiled ? serializeCompiledShow(compiled) : null },
     preparation: { result: prepared, prepare: () => { if (!snapshot.project || !compiled) return false; try { setError(null); setPrepared(prepareCompiledShow(snapshot.project, compiled)); return true; } catch (cause) { setPrepared(null); setError(preparationFriendlyError(cause)); return false; } }, serialized: () => prepared ? serializePreparedShow(prepared) : null },
+    hardware:{connection,ports,revision:hardwareRevision,refreshPorts:()=>run(async()=>{setPorts(await connection.listPorts());}),connect:port=>run(async()=>{await connection.connect(port);hardwareSync();}),disconnect:()=>run(async()=>{await connection.disconnect();hardwareSync();}),refreshStatus:()=>run(async()=>{await connection.refreshStatus();hardwareSync();}),bind:masterId=>edit((project,at)=>bindEsp32(project,masterId,connection.identity?.deviceId??'',createStableId,at)),unbind:masterId=>edit((project,at)=>unbindEsp32(project,masterId,at)),upload:masterId=>run(async()=>{const show=prepared?.masters.find(m=>m.masterId===masterId);if(!show)throw new Error('No current prepared artifact exists for this Master.');await connection.uploadAndActivate(show,hardwareSync);hardwareSync();}),cancelUpload:()=>run(async()=>{await connection.cancelUpload();hardwareSync();}),start:()=>run(async()=>{await connection.start();hardwareSync();}),stop:()=>run(async()=>{await connection.stop();hardwareSync();})},
     audio: { availability: audioAvailability, transport, waveform, importAudio: () => run(chooseAudio), locateAudio: () => run(chooseAudio), removeAudio: () => { playback.unload(); edit((project, at) => removeProjectAudio(project, at)); setAudioAvailability('none'); setWaveform({ status: 'idle', data: null, error: null }); }, play: () => run(() => playback.play()), pause: () => playback.pause(), seek: value => playback.seek(timelineTime(value)) },
     topology: {
       addCostume: name => edit((project, at) => addCostume(project, name, createStableId, at)), renameCostume: (id, name) => edit((project, at) => renameCostume(project, id, name, at)), deleteCostume: id => edit((project, at) => removeCostume(project, id, at)), moveCostume: (from, to) => edit((project, at) => reorderCostumes(project, from, to, at)),

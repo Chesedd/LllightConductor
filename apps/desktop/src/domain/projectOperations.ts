@@ -28,6 +28,16 @@ export function removeCostume(project: Project, id: CostumeId, timestamp: Timest
 }
 export function reorderCostumes(project: Project, from: number, to: number, timestamp: Timestamp): Project { return finish({ ...project, costumes: move(project.costumes, from, to) }, timestamp); }
 
+export function bindEsp32(project: Project, masterId: ControllerId, deviceId: string, createId: IdGenerator, timestamp: Timestamp): Project {
+  const hardwareId=named(deviceId,'ESP32 device ID').toLowerCase();
+  const master=project.costumes.some(c=>c.master.id===masterId&&c.master.type==='esp32');
+  if(!master)throw new Error('Binding must target an ESP32 Master');
+  if(project.deviceBindings.some(b=>b.physicalDevice.type==='esp32'&&b.physicalDevice.hardwareId.toLowerCase()===hardwareId&&b.logicalControllerId!==masterId))throw new Error('ESP32 is already bound to another Master');
+  const retained=project.deviceBindings.filter(b=>!(b.logicalControllerId===masterId&&b.physicalDevice.type==='esp32'));
+  return finish({...project,deviceBindings:[...retained,{id:createId(),logicalControllerId:masterId,physicalDevice:{type:'esp32',hardwareId}}]},timestamp);
+}
+export function unbindEsp32(project:Project,masterId:ControllerId,timestamp:Timestamp):Project{return finish({...project,deviceBindings:project.deviceBindings.filter(b=>!(b.logicalControllerId===masterId&&b.physicalDevice.type==='esp32'))},timestamp);}
+
 export function addSlave(project: Project, masterId: ControllerId, input: { displayName: string; type?: SlaveControllerType; logicalAddress?: number }, createId: IdGenerator, timestamp: Timestamp): Project {
   return finish({ ...project, costumes: project.costumes.map(costume => {
     if (costume.master.id !== masterId) return costume;

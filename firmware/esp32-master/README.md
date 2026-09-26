@@ -71,3 +71,16 @@ transitions; Protocol bytes never go to the console.
 - measured timing depends on target/load and needs hardware characterization.
 
 See [`../../docs/firmware/esp32-master-v1.md`](../../docs/firmware/esp32-master-v1.md).
+
+## Desktop serial transport
+
+The production baseline now runs Desktop Protocol v1 on a **dedicated** configurable
+UART (defaults: UART2, TX GPIO25, RX GPIO26) at 460800 8-N-1. Connect it through a
+3.3 V USB-UART bridge. Configure the UART and pins under `Desktop serial transport`
+in menuconfig for the selected chip; chips without this UART require another explicit
+configuration/adapter. Do not select UART1/GPIO17/GPIO16 (Pico) or the debug console.
+
+Device identity is stable across reboot: the first 128 bits of SHA-256 over the
+`lllight-device-v1` domain and factory eFuse base MAC. Active/candidate shows remain
+RAM-only. See [`../../docs/architecture/desktop-esp32-serial.md`](../../docs/architecture/desktop-esp32-serial.md)
+for architecture and the complete hardware test procedure.

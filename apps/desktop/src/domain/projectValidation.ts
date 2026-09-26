@@ -84,6 +84,10 @@ export function validateProject(project: Project): ValidationIssue[] {
     if (!controllerIds.has(binding.logicalControllerId)) issues.push({ path: `deviceBindings[${index}].logicalControllerId`, message: 'Binding must reference an existing controller' });
     if (!binding.physicalDevice.type.trim()) issues.push({ path: `deviceBindings[${index}].physicalDevice.type`, message: 'Device type is required' });
     if (!binding.physicalDevice.hardwareId.trim()) issues.push({ path: `deviceBindings[${index}].physicalDevice.hardwareId`, message: 'Hardware ID is required' });
+    const duplicatePhysical=project.deviceBindings.findIndex((other,otherIndex)=>otherIndex<index&&other.physicalDevice.type===binding.physicalDevice.type&&other.physicalDevice.hardwareId.toLowerCase()===binding.physicalDevice.hardwareId.toLowerCase());
+    if(duplicatePhysical>=0)issues.push({path:`deviceBindings[${index}]`,message:`Physical device is already used by deviceBindings[${duplicatePhysical}]`});
+    const duplicateLogical=project.deviceBindings.findIndex((other,otherIndex)=>otherIndex<index&&other.logicalControllerId===binding.logicalControllerId&&other.physicalDevice.type===binding.physicalDevice.type);
+    if(duplicateLogical>=0)issues.push({path:`deviceBindings[${index}]`,message:`Controller already has this binding type in deviceBindings[${duplicateLogical}]`});
   });
   return issues;
 }
