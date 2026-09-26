@@ -1,8 +1,216 @@
+use serde::Serialize;
 use std::{
     fs,
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    thread::JoinHandle,
+    time::Duration,
 };
+use tauri::Emitter;
+
+const SERIAL_BAUD: u32 = 460_800;
+
+#[derive(Default)]
+struct SerialState(Mutex<Option<OpenSerial>>);
+struct OpenSerial {
+    port_name: String,
+    writer: Box<dyn serialport::SerialPort>,
+    stop: Arc<AtomicBool>,
+    reader: Option<JoinHandle<()>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SerialPortInfo {
+    port_name: String,
+    port_type: String,
+    vid: Option<u16>,
+    pid: Option<u16>,
+    manufacturer: Option<String>,
+    product: Option<String>,
+    serial_number: Option<String>,
+}
+
+#[derive(Serialize)]
+struct SerialCommandError {
+    code: &'static str,
+    message: String,
+}
+impl SerialCommandError {
+    fn new(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+        }
+    }
+}
+
+fn map_open_error(name: &str, error: serialport::Error) -> SerialCommandError {
+    let message = error.to_string();
+    match error.kind() {
+        serialport::ErrorKind::NoDevice => SerialCommandError::new("PortNotFound", name),
+        serialport::ErrorKind::Io(std::io::ErrorKind::PermissionDenied) => {
+            SerialCommandError::new("PermissionDenied", message)
+        }
+        serialport::ErrorKind::Io(std::io::ErrorKind::WouldBlock) => {
+            SerialCommandError::new("PortBusy", message)
+        }
+        _ if message.to_ascii_lowercase().contains("busy")
+            || message.to_ascii_lowercase().contains("in use") =>
+        {
+            SerialCommandError::new("PortBusy", message)
+        }
+        _ => SerialCommandError::new("OpenFailed", message),
+    }
+}
+
+#[tauri::command]
+fn list_serial_ports() -> Result<Vec<SerialPortInfo>, SerialCommandError> {
+    serialport::available_ports()
+        .map_err(|e| SerialCommandError::new("OpenFailed", e.to_string()))
+        .map(|ports| {
+            ports
+                .into_iter()
+                .map(|p| {
+                    let (port_type, vid, pid, manufacturer, product, serial_number) =
+                        match p.port_type {
+                            serialport::SerialPortType::UsbPort(u) => (
+                                "usb",
+                                Some(u.vid),
+                                Some(u.pid),
+                                u.manufacturer,
+                                u.product,
+                                u.serial_number,
+                            ),
+                            serialport::SerialPortType::BluetoothPort => {
+                                ("bluetooth", None, None, None, None, None)
+                            }
+                            serialport::SerialPortType::PciPort => {
+                                ("pci", None, None, None, None, None)
+                            }
+                            serialport::SerialPortType::Unknown => {
+                                ("unknown", None, None, None, None, None)
+                            }
+                        };
+                    SerialPortInfo {
+                        port_name: p.port_name,
+                        port_type: port_type.into(),
+                        vid,
+                        pid,
+                        manufacturer,
+                        product,
+                        serial_number,
+                    }
+                })
+                .collect()
+        })
+}
+
+#[tauri::command]
+fn open_serial_port(
+    app: tauri::AppHandle,
+    state: tauri::State<SerialState>,
+    port_name: String,
+) -> Result<(), SerialCommandError> {
+    let mut slot = state
+        .0
+        .lock()
+        .map_err(|_| SerialCommandError::new("OpenFailed", "serial state poisoned"))?;
+    if slot
+        .as_ref()
+        .and_then(|open| open.reader.as_ref())
+        .is_some_and(JoinHandle::is_finished)
+    {
+        if let Some(mut stale) = slot.take() {
+            if let Some(reader) = stale.reader.take() {
+                let _ = reader.join();
+            }
+        }
+    }
+    if slot.is_some() {
+        return Err(SerialCommandError::new(
+            "PortBusy",
+            "another serial port is already open",
+        ));
+    }
+    let writer = serialport::new(&port_name, SERIAL_BAUD)
+        .data_bits(serialport::DataBits::Eight)
+        .parity(serialport::Parity::None)
+        .stop_bits(serialport::StopBits::One)
+        .flow_control(serialport::FlowControl::None)
+        .timeout(Duration::from_millis(50))
+        .open()
+        .map_err(|e| map_open_error(&port_name, e))?;
+    let mut reader = writer
+        .try_clone()
+        .map_err(|e| SerialCommandError::new("OpenFailed", e.to_string()))?;
+    let stop = Arc::new(AtomicBool::new(false));
+    let reader_stop = stop.clone();
+    let reader_name = port_name.clone();
+    let handle = std::thread::spawn(move || {
+        let mut bytes = [0u8; 4096];
+        while !reader_stop.load(Ordering::Acquire) {
+            match reader.read(&mut bytes) {
+                Ok(n) if n > 0 => {
+                    let _ = app.emit("serial://bytes", bytes[..n].to_vec());
+                }
+                Ok(_) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {}
+                Err(e) => {
+                    let _ = app.emit(
+                        "serial://disconnect",
+                        SerialCommandError::new("ReadFailed", format!("{reader_name}: {e}")),
+                    );
+                    break;
+                }
+            }
+        }
+    });
+    *slot = Some(OpenSerial {
+        port_name,
+        writer,
+        stop,
+        reader: Some(handle),
+    });
+    Ok(())
+}
+
+#[tauri::command]
+fn write_serial(
+    state: tauri::State<SerialState>,
+    bytes: Vec<u8>,
+) -> Result<(), SerialCommandError> {
+    let mut slot = state
+        .0
+        .lock()
+        .map_err(|_| SerialCommandError::new("Disconnected", "serial state poisoned"))?;
+    let open = slot
+        .as_mut()
+        .ok_or_else(|| SerialCommandError::new("Disconnected", "no serial port is open"))?;
+    open.writer
+        .write_all(&bytes)
+        .map_err(|e| SerialCommandError::new("WriteFailed", format!("{}: {e}", open.port_name)))
+}
+
+#[tauri::command]
+fn close_serial_port(state: tauri::State<SerialState>) -> Result<(), SerialCommandError> {
+    let mut open = state
+        .0
+        .lock()
+        .map_err(|_| SerialCommandError::new("Disconnected", "serial state poisoned"))?
+        .take();
+    if let Some(ref mut value) = open {
+        value.stop.store(true, Ordering::Release);
+        if let Some(reader) = value.reader.take() {
+            let _ = reader.join();
+        }
+    }
+    Ok(())
+}
 
 #[tauri::command]
 fn choose_project_to_open() -> Option<String> {
@@ -121,13 +329,18 @@ fn replace_file(source: &Path, target: &Path) -> std::io::Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(SerialState::default())
         .invoke_handler(tauri::generate_handler![
             choose_project_to_open,
             choose_project_save_path,
             choose_audio_file,
             audio_file_exists,
             read_project_file,
-            atomic_write_project_file
+            atomic_write_project_file,
+            list_serial_ports,
+            open_serial_port,
+            write_serial,
+            close_serial_port
         ])
         .run(tauri::generate_context!())
         .expect("error while running Lllight Conductor");

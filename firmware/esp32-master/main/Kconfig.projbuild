@@ -3,3 +3,14 @@ config LLLIGHT_DEMO_AUTO_START
     bool "Auto-start demo when READY (bench use only)"
     default n
 endmenu
+menu "Desktop serial transport"
+config LLLIGHT_DESKTOP_UART_PORT
+    int "Dedicated desktop UART number"
+    default 2
+config LLLIGHT_DESKTOP_UART_TX_PIN
+    int "Desktop UART TX GPIO"
+    default 25
+config LLLIGHT_DESKTOP_UART_RX_PIN
+    int "Desktop UART RX GPIO"
+    default 26
+endmenu
