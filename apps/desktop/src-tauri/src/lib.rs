@@ -4,7 +4,7 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
         Arc, Mutex,
     },
     thread::JoinHandle,
@@ -15,8 +15,12 @@ use tauri::Emitter;
 const SERIAL_BAUD: u32 = 460_800;
 
 #[derive(Default)]
-struct SerialState(Mutex<Option<OpenSerial>>);
+struct SerialState {
+    open: Mutex<Option<OpenSerial>>,
+    next_generation: AtomicU32,
+}
 struct OpenSerial {
+    generation: u32,
     port_name: String,
     writer: Box<dyn serialport::SerialPort>,
     stop: Arc<AtomicBool>,
@@ -35,10 +39,24 @@ struct SerialPortInfo {
     serial_number: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct SerialCommandError {
     code: &'static str,
     message: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SerialBytesEvent {
+    generation: u32,
+    bytes: Vec<u8>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SerialDisconnectEvent {
+    generation: u32,
+    error: SerialCommandError,
 }
 impl SerialCommandError {
     fn new(code: &'static str, message: impl Into<String>) -> Self {
@@ -58,6 +76,11 @@ fn map_open_error(name: &str, error: serialport::Error) -> SerialCommandError {
         }
         serialport::ErrorKind::Io(std::io::ErrorKind::WouldBlock) => {
             SerialCommandError::new("PortBusy", message)
+        }
+        _ if message.to_ascii_lowercase().contains("access is denied")
+            || message.to_ascii_lowercase().contains("access denied") =>
+        {
+            SerialCommandError::new("PermissionDenied", message)
         }
         _ if message.to_ascii_lowercase().contains("busy")
             || message.to_ascii_lowercase().contains("in use") =>
@@ -115,9 +138,9 @@ fn open_serial_port(
     app: tauri::AppHandle,
     state: tauri::State<SerialState>,
     port_name: String,
-) -> Result<(), SerialCommandError> {
+) -> Result<u32, SerialCommandError> {
     let mut slot = state
-        .0
+        .open
         .lock()
         .map_err(|_| SerialCommandError::new("OpenFailed", "serial state poisoned"))?;
     if slot
@@ -149,6 +172,7 @@ fn open_serial_port(
         .try_clone()
         .map_err(|e| SerialCommandError::new("OpenFailed", e.to_string()))?;
     let stop = Arc::new(AtomicBool::new(false));
+    let generation = state.next_generation.fetch_add(1, Ordering::Relaxed);
     let reader_stop = stop.clone();
     let reader_name = port_name.clone();
     let handle = std::thread::spawn(move || {
@@ -156,53 +180,86 @@ fn open_serial_port(
         while !reader_stop.load(Ordering::Acquire) {
             match reader.read(&mut bytes) {
                 Ok(n) if n > 0 => {
-                    let _ = app.emit("serial://bytes", bytes[..n].to_vec());
+                    let _ = app.emit(
+                        "serial://bytes",
+                        SerialBytesEvent {
+                            generation,
+                            bytes: bytes[..n].to_vec(),
+                        },
+                    );
                 }
                 Ok(_) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {}
                 Err(e) => {
-                    let _ = app.emit(
-                        "serial://disconnect",
-                        SerialCommandError::new("ReadFailed", format!("{reader_name}: {e}")),
-                    );
+                    if !reader_stop.load(Ordering::Acquire) {
+                        let _ = app.emit(
+                            "serial://disconnect",
+                            SerialDisconnectEvent {
+                                generation,
+                                error: SerialCommandError::new(
+                                    "ReadFailed",
+                                    format!("{reader_name}: {e}"),
+                                ),
+                            },
+                        );
+                    }
                     break;
                 }
             }
         }
     });
     *slot = Some(OpenSerial {
+        generation,
         port_name,
         writer,
         stop,
         reader: Some(handle),
     });
-    Ok(())
+    Ok(generation)
 }
 
 #[tauri::command]
 fn write_serial(
     state: tauri::State<SerialState>,
+    generation: u32,
     bytes: Vec<u8>,
 ) -> Result<(), SerialCommandError> {
     let mut slot = state
-        .0
+        .open
         .lock()
         .map_err(|_| SerialCommandError::new("Disconnected", "serial state poisoned"))?;
     let open = slot
         .as_mut()
         .ok_or_else(|| SerialCommandError::new("Disconnected", "no serial port is open"))?;
+    if open.generation != generation {
+        return Err(SerialCommandError::new(
+            "Disconnected",
+            "serial connection generation is stale",
+        ));
+    }
     open.writer
         .write_all(&bytes)
         .map_err(|e| SerialCommandError::new("WriteFailed", format!("{}: {e}", open.port_name)))
 }
 
 #[tauri::command]
-fn close_serial_port(state: tauri::State<SerialState>) -> Result<(), SerialCommandError> {
-    let mut open = state
-        .0
+fn close_serial_port(
+    state: tauri::State<SerialState>,
+    generation: u32,
+) -> Result<(), SerialCommandError> {
+    let mut slot = state
+        .open
         .lock()
-        .map_err(|_| SerialCommandError::new("Disconnected", "serial state poisoned"))?
-        .take();
+        .map_err(|_| SerialCommandError::new("Disconnected", "serial state poisoned"))?;
+    let mut open = if slot
+        .as_ref()
+        .is_some_and(|open| open.generation == generation)
+    {
+        slot.take()
+    } else {
+        None
+    };
+    drop(slot);
     if let Some(ref mut value) = open {
         value.stop.store(true, Ordering::Release);
         if let Some(reader) = value.reader.take() {
