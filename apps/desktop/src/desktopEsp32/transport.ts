@@ -7,18 +7,21 @@ export type TransportErrorCode='PortNotFound'|'PortBusy'|'PermissionDenied'|'Ope
 export class DesktopTransportError extends Error { constructor(readonly code:TransportErrorCode,message:string){super(message);this.name='DesktopTransportError';} }
 export interface DesktopEsp32Transport { listPorts():Promise<SerialPortDescriptor[]>; open(portName:string):Promise<void>; close():Promise<void>; write(bytes:Uint8Array):Promise<void>; onBytes(listener:(bytes:Uint8Array)=>void):()=>void; onDisconnect(listener:(error:DesktopTransportError)=>void):()=>void }
 type NativeError={code?:TransportErrorCode;message?:string};
+type NativeBytesEvent={generation:number;bytes:number[]};
+type NativeDisconnectEvent={generation:number;error:NativeError};
 const nativeError=(cause:unknown,fallback:TransportErrorCode)=>{const e=cause as NativeError;return new DesktopTransportError(e?.code??fallback,e?.message??String(cause));};
+export const nativeBytes=(payload:NativeBytesEvent):Uint8Array=>Uint8Array.from(payload.bytes);
 
-/** Tauri IPC sends bounded read chunks as JSON byte arrays; no hex expansion or protocol work crosses the native boundary. */
+/** Tauri IPC sends 4096-byte-max reads as JSON byte arrays; its event queue has no backpressure. */
 export class TauriSerialPortGateway implements DesktopEsp32Transport {
- private bytes=new Set<(bytes:Uint8Array)=>void>(); private disconnects=new Set<(error:DesktopTransportError)=>void>(); private unlisten:UnlistenFn[]=[];
+ private bytes=new Set<(bytes:Uint8Array)=>void>(); private disconnects=new Set<(error:DesktopTransportError)=>void>(); private unlisten:UnlistenFn[]=[]; private generation?:number;
  async listPorts(){try{return await invoke<SerialPortDescriptor[]>('list_serial_ports');}catch(e){throw nativeError(e,'OpenFailed');}}
- async open(portName:string){await this.installListeners();try{await invoke('open_serial_port',{portName});}catch(e){throw nativeError(e,'OpenFailed');}}
- async close(){try{await invoke('close_serial_port');}catch(e){throw nativeError(e,'Disconnected');}finally{this.removeListeners();}}
- async write(bytes:Uint8Array){try{await invoke('write_serial',{bytes:Array.from(bytes)});}catch(e){throw nativeError(e,'WriteFailed');}}
+ async open(portName:string){await this.installListeners();try{this.generation=await invoke<number>('open_serial_port',{portName});}catch(e){throw nativeError(e,'OpenFailed');}}
+ async close(){const generation=this.generation;this.generation=undefined;try{if(generation!==undefined)await invoke('close_serial_port',{generation});}catch(e){throw nativeError(e,'Disconnected');}finally{this.removeListeners();}}
+ async write(bytes:Uint8Array){try{if(this.generation===undefined)throw new DesktopTransportError('Disconnected','no serial port is open');await invoke('write_serial',{generation:this.generation,bytes:Array.from(bytes)});}catch(e){throw nativeError(e,'WriteFailed');}}
  onBytes(listener:(bytes:Uint8Array)=>void){this.bytes.add(listener);return()=>this.bytes.delete(listener);}
  onDisconnect(listener:(error:DesktopTransportError)=>void){this.disconnects.add(listener);return()=>this.disconnects.delete(listener);}
- private async installListeners(){if(this.unlisten.length)return;this.unlisten.push(await listen<number[]>('serial://bytes',e=>this.bytes.forEach(fn=>fn(Uint8Array.from(e.payload)))));this.unlisten.push(await listen<NativeError>('serial://disconnect',e=>{const error=nativeError(e.payload,'Disconnected');this.disconnects.forEach(fn=>fn(error));}));}
+ private async installListeners(){if(this.unlisten.length)return;this.unlisten.push(await listen<NativeBytesEvent>('serial://bytes',e=>{if(e.payload.generation===this.generation)this.bytes.forEach(fn=>fn(nativeBytes(e.payload)));}));this.unlisten.push(await listen<NativeDisconnectEvent>('serial://disconnect',e=>{if(e.payload.generation!==this.generation)return;const error=nativeError(e.payload.error,'Disconnected');this.disconnects.forEach(fn=>fn(error));}));}
  private removeListeners(){this.unlisten.splice(0).forEach(fn=>fn());}
 }
 

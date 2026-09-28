@@ -4,7 +4,7 @@
 
 The React application talks to `DesktopEsp32Connection`, which owns Protocol v1 framing, streaming parsing, sessions, request matching, retries, upload and status decoding. It only sees the `DesktopEsp32Transport` interface. `TauriSerialPortGateway` implements that interface with four small native commands. Rust uses the mature, cross-platform `serialport` crate directly rather than a Tauri plugin.
 
-The native side is byte transport only: enumerate, open, read, write and close. A single owned port has one reader thread and one cloned write handle. Shutdown is signalled and joined. Tauri events carry bounded byte arrays; this avoids hex/base64 expansion while preserving arbitrary read boundaries. Protocol parsing never occurs in Rust.
+The native side is byte transport only: enumerate, open, read, write and close. A single owned port has one reader thread and one cloned write handle. Shutdown is signalled and joined. Every open receives a generation number; reads, disconnects, writes, and closes carry that number so a late event or close from an old reader cannot affect a replacement connection. Tauri events carry byte arrays capped at the native 4096-byte read buffer; this avoids hex/base64 expansion while preserving arbitrary read boundaries. **Tauri's event API does not provide backpressure:** individual chunks are bounded, but the event queue is not. Sustained input faster than the frontend can consume can therefore accumulate queued events; this is an explicit MVP limitation rather than a bounded transport claim. Protocol parsing never occurs in Rust.
 
 Serial is **460800 baud, 8 data bits, no parity, 1 stop bit, no flow control**. The handshake timeout is 1000 ms. Normal requests use 750 ms and two retransmissions of the exact encoded bytes and sequence. Sequence numbers are uint16 and wrap. Disconnect rejects every pending request. A fresh random session ID is created for every open attempt; an open port is not Connected until `HELLO_ACK` is validated.
 
@@ -24,7 +24,7 @@ Upload selects only the prepared artifact for the bound Master. It sends BEGIN, 
 
 ## Manual hardware test
 
-1. Build and flash the Pico firmware; wire Pico UART1 GP4/GP5 and ground to ESP32 UART1 GPIO17/GPIO16 as documented.
+1. Build and flash the Pico firmware; wire Pico UART1 GP4/GP5 and ground to ESP32 UART1 GPIO17/GPIO16 as documented. For the first test, connect GP10–GP13 only to ordinary LEDs through suitable current-limiting resistors (or a logic analyzer). Do **not** connect an EL inverter yet; move to a suitable MOSFET/relay driver only after the GPIO sequence and all-OFF behavior are confirmed.
 2. Select the real ESP32 target and configure the dedicated desktop UART/pins in `idf.py menuconfig`.
 3. Build and flash ESP32. Keep its debug console separate from the desktop UART.
 4. Connect a 3.3 V USB-UART bridge to the configured desktop TX/RX (cross TX/RX) and common ground, then connect it to the PC.
@@ -33,9 +33,17 @@ Upload selects only the prepared artifact for the bound Master. It sends BEGIN, 
 7. Open/create a project, then bind the connected ID to the intended Costume / Master.
 8. In the editor run **Compile**, then **Prepare**.
 9. Return to Devices and choose **Upload & Activate**. Verify progress completes and local/device hashes match.
-10. Choose **Start Show** and verify the expected Pico GPIO/LED output.
-11. Choose **Stop Show** and verify outputs are OFF.
-12. Optionally start again, disconnect without stopping, reconnect, and verify STATUS reports the autonomous device state.
+10. Choose **Start Show**; verify STATUS transitions through Preparing/Running and the expected Pico GPIO/LED sequence.
+11. Record `lateFrameCount` and `maxLatenessUs` from STATUS for this first physical run; do not tune timing before collecting these measurements.
+12. Choose **Stop Show** and verify all outputs are OFF. Repeat STOP and verify it remains safe.
+13. Start again, disconnect the desktop cable without stopping, and verify the ESP32 continues the show. Reconnect, verify the same Device ID and current RUNNING status, then STOP and verify all outputs are OFF.
+
+Also perform the following failure checks on the bench without deliberately shorting or corrupting electrical lines:
+
+- boot/start with Pico absent: START must not settle into normal RUNNING;
+- unplug Pico during a show: a fault must be reported and firmware must remain responsive;
+- cancel a partial upload, reconnect/HELLO, and verify staging is discarded while the prior active show remains;
+- send an incomplete/corrupt upload and verify the prior active show remains.
 
 ## Limitations
 

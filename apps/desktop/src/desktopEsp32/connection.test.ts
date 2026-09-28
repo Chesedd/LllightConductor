@@ -1,6 +1,6 @@
 import { describe,expect,it,vi } from 'vitest';
 import { DesktopEsp32Connection, compareArtifacts } from './connection';
-import { FakeDesktopEsp32Transport } from './transport';
+import { FakeDesktopEsp32Transport, nativeBytes } from './transport';
 import { decodeDesktopFrame, encodeDesktopFrame, DesktopMessageType, DeviceState } from './protocol';
 import { ReferenceEsp32Device } from './referenceDevice';
 
@@ -9,6 +9,7 @@ const show={masterId:'m',costumeId:'c',durationMs:100,frames:[{timeMs:0,slaveBat
 describe('DesktopEsp32Connection',()=>{
  it('lists ports, handshakes through arbitrary chunks, gets status, and disconnects without STOP',async()=>{const{connection,transport}=integrated();expect((await connection.listPorts())[0].portName).toBe('COM7');await connection.connect('COM7');expect(decodeDesktopFrame(transport.writes[0]).messageType).toBe(DesktopMessageType.HELLO);expect(connection.phase).toBe('Connected');expect(connection.identity?.deviceId).toHaveLength(32);await connection.disconnect();expect(transport.writes.map(x=>decodeDesktopFrame(x).messageType)).not.toContain(DesktopMessageType.STOP_SHOW);});
  it('uploads, reports progress, verifies activation, starts and stops',async()=>{const{connection,device}=integrated();await connection.connect('COM7');const progress:number[]=[];await connection.uploadAndActivate(show,(sent)=>progress.push(sent));expect(progress.at(-1)).toBeGreaterThan(0);expect(connection.status?.activeArtifact).toBeTruthy();await connection.start();expect(device.state).toBe(DeviceState.RUNNING);await connection.stop();expect(device.state).toBe(DeviceState.READY);});
+ it('chunks and activates a large prepared artifact through fragmented loopback responses',async()=>{const{connection,device}=integrated();await connection.connect('COM7');const large={...show,durationMs:5_999,frames:Array.from({length:6_000},(_,timeMs)=>({timeMs,slaveBatches:[{slaveAddress:7,updates:[{outputId:timeMs%4,state:timeMs%2?'OFF' as const:'ON' as const}]}]}))};const progress:number[]=[];await connection.uploadAndActivate(large,sent=>progress.push(sent));expect(connection.uploadProgress?.total).toBeGreaterThanOrEqual(50*1024);expect(progress.length).toBeGreaterThan(50);expect(progress.at(-1)).toBe(connection.uploadProgress?.total);expect(connection.status?.activeArtifact).toBeTruthy();expect(device.active?.durationMs).toBe(5_999);});
  it('rejects all pending requests after unexpected disconnect',async()=>{const{connection,transport}=integrated();await connection.connect('COM7');transport.write=async()=>{};const pending=connection.refreshStatus();transport.disconnect();await expect(pending).rejects.toMatchObject({code:'Disconnected'});expect(connection.phase).toBe('Error');});
  it('uses a fresh session when reconnecting',async()=>{let id=1;const{connection,transport}=integrated(()=>id++);const sessions:number[]=[];const original=transport.write.bind(transport);transport.write=async b=>{sessions.push(decodeDesktopFrame(b).sessionId);await original(b)};await connection.connect('COM7');await connection.disconnect();await connection.connect('COM7');expect(new Set(sessions)).toEqual(new Set([1,2]));
  });
@@ -16,3 +17,4 @@ describe('DesktopEsp32Connection',()=>{
  it('ignores wrong sequence and records malformed frames',async()=>{const{connection,transport}=integrated();await connection.connect('COM7');transport.inject(new Uint8Array([0xd3,0x32,1,2,0,0,0,0,0,0,0,0,0,0,0,0]));expect(connection.lastError).toBeTruthy();});
 });
 describe('artifact comparison',()=>{it('distinguishes match, difference, and missing local data',()=>{expect(compareArtifacts('a','a')).toBe('Match');expect(compareArtifacts('a','b')).toBe('Different');expect(compareArtifacts(undefined,'a')).toBe('No local artifact');});});
+describe('native serial bytes',()=>{it('preserves unsigned boundary values across the IPC representation',()=>{expect([...nativeBytes({generation:4,bytes:[0x00,0x7f,0x80,0xff]})]).toEqual([0x00,0x7f,0x80,0xff]);});});

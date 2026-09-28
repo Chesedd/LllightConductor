@@ -63,9 +63,9 @@ transitions; Protocol bytes never go to the console.
 ## Known limitations
 
 - one physical Pico despite the multi-address portable core;
-- no real desktop serial adapter, COM discovery/UI, flash persistence, or multi-ESP sync;
+- no flash persistence or multi-ESP sync; desktop serial is the dedicated UART described below;
 - active and staged artifacts are volatile RAM; reboot loses both;
-- production `DeviceIdentityProvider` is not wired yet (host tests use a fixed ID);
+- production identity uses the factory base MAC and is covered by a fixed host fixture;
 - no communication-loss watchdog, so a broken wire cannot guarantee physical OFF;
 - compile-time auto-start is the first prototype's only local demo trigger;
 - measured timing depends on target/load and needs hardware characterization.
@@ -78,7 +78,9 @@ The production baseline now runs Desktop Protocol v1 on a **dedicated** configur
 UART (defaults: UART2, TX GPIO25, RX GPIO26) at 460800 8-N-1. Connect it through a
 3.3 V USB-UART bridge. Configure the UART and pins under `Desktop serial transport`
 in menuconfig for the selected chip; chips without this UART require another explicit
-configuration/adapter. Do not select UART1/GPIO17/GPIO16 (Pico) or the debug console.
+configuration/adapter. Startup fails with a diagnostic if the selected UART does not
+exist, is UART1 (reserved for Pico), or is the configured ESP-IDF UART console. Do not
+select GPIO17/GPIO16 (Pico), console pins, or pins unavailable on the selected package.
 
 Device identity is stable across reboot: the first 128 bits of SHA-256 over the
 `lllight-device-v1` domain and factory eFuse base MAC. Active/candidate shows remain
