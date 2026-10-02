@@ -18,7 +18,8 @@ int main(){static_assert(pico_slave::config::kUartInstance<=1);auto*protocol_uar
 #if PICO_SLAVE_DIAGNOSTICS
  printf("PICO READY\nslave=%u\nrxPin=GP%u\n",pico_slave::config::kSlaveAddress,pico_slave::config::kUartRxPin);
 #endif
- pico_slave::StreamParser parser;absolute_time_t led_off=get_nil_time(),next_stats=make_timeout_time_ms(2000);uint32_t reported_bytes=0;
+ pico_slave::StreamParser parser;absolute_time_t led_off=nil_time;
+ absolute_time_t next_stats=make_timeout_time_ms(2000);uint32_t reported_bytes=0;
  while(true){while(uart_is_readable(protocol_uart)){pico_slave::Frame frame;processor.noteBytes(1);auto result=parser.feed(uint8_t(uart_getc(protocol_uart)),frame);if(result==pico_slave::StreamParser::Result::CrcError){processor.noteCrcError();
 #if PICO_SLAVE_DIAGNOSTICS
  printf("RX CRC_ERROR\n");
@@ -33,6 +34,6 @@ int main(){static_assert(pico_slave::config::kUartInstance<=1);auto*protocol_uar
 #endif
  }}
 #if PICO_SLAVE_DIAGNOSTICS
- if(!is_nil_time(led_off)&&time_reached(led_off)){gpio_put(PICO_DEFAULT_LED_PIN,false);led_off=get_nil_time();}if(time_reached(next_stats)){const auto&c=processor.counters();if(c.bytesReceived!=reported_bytes){reported_bytes=c.bytesReceived;printf("RX stats bytes=%lu frames=%lu valid=%lu crc=%lu invalid=%lu applied=%lu\n",(unsigned long)c.bytesReceived,(unsigned long)c.framesReceived,(unsigned long)c.validFrames,(unsigned long)c.crcErrors,(unsigned long)c.invalidFrames,(unsigned long)(c.resetCommandsApplied+c.setCommandsApplied));}next_stats=make_timeout_time_ms(2000);}
+ if(!is_nil_time(led_off)&&time_reached(led_off)){gpio_put(PICO_DEFAULT_LED_PIN,false);led_off=nil_time;}if(time_reached(next_stats)){const auto&c=processor.counters();if(c.bytesReceived!=reported_bytes){reported_bytes=c.bytesReceived;printf("RX stats bytes=%lu frames=%lu valid=%lu crc=%lu invalid=%lu applied=%lu\n",(unsigned long)c.bytesReceived,(unsigned long)c.framesReceived,(unsigned long)c.validFrames,(unsigned long)c.crcErrors,(unsigned long)c.invalidFrames,(unsigned long)(c.resetCommandsApplied+c.setCommandsApplied));}next_stats=make_timeout_time_ms(2000);}
 #endif
  tight_loop_contents();}}
