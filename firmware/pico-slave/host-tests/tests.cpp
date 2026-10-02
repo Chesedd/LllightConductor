@@ -1,70 +1,19 @@
 #include "pico_slave/command_processor.hpp"
 #include "pico_slave/stream_parser.hpp"
-
 #include <array>
 #include <cstdio>
 #include <cstdlib>
-#include <initializer_list>
 #include <vector>
-
 using namespace pico_slave;
-#define CHECK(x) do { if (!(x)) { std::fprintf(stderr,"FAIL %s:%d: %s\n",__FILE__,__LINE__,#x); std::exit(1); } } while(0)
-
-class FakeOutputs final : public OutputController {
- public:
-  bool initialize() override { initialized=true; states.fill(false); return true; }
-  bool resetAll() override { states.fill(false); ++resets; return true; }
-  bool validateOutput(uint8_t id) const override { return id < 4; }
-  bool applyBatch(const OutputUpdate* u, std::size_t n) override { ++applies; for(std::size_t i=0;i<n;++i) states[u[i].output_id]=u[i].on; return true; }
-  std::size_t configuredCount() const override { return 4; }
-  bool readState(uint8_t id, bool& on) const override { if(id>=4)return false; on=states[id]; return true; }
-  bool initialized{}; int resets{}; int applies{}; std::array<bool,4> states{};
-};
-
-std::vector<uint8_t> hex(std::initializer_list<uint8_t> v) { return v; }
-Frame decode(const std::vector<uint8_t>& v) { Frame f; CHECK(decodeFrame(v.data(),v.size(),f)); return f; }
-Frame request(MessageType type,uint16_t seq=1,uint32_t session=9,std::initializer_list<uint8_t> payload={}) {
-  Frame f; f.message_type=uint8_t(type); f.slave_address=7; f.sequence=seq; f.session_id=session; f.payload_length=payload.size();
-  std::size_t i=0; for(auto b:payload)f.payload[i++]=b; return f;
-}
-void sameBytes(const Frame& f,const std::vector<uint8_t>& expected) { std::array<uint8_t,kMaxFrameSize>b{}; auto n=encodeFrame(f,b); CHECK(n==expected.size()); for(std::size_t i=0;i<n;++i)CHECK(b[i]==expected[i]); }
-
-int main() {
-  const auto hello=hex({0xA5,0x5A,0x01,0x01,0x07,0x34,0x12,0xEF,0xCD,0xAB,0x89,0,0,0xDA,0xC1});
-  const auto setone=hex({0xA5,0x5A,1,6,7,0x37,0x12,0xEF,0xCD,0xAB,0x89,3,0,1,3,1,0x49,0xC5});
-  const auto ack=hex({0xA5,0x5A,1,7,7,0x37,0x12,0xEF,0xCD,0xAB,0x89,0,0,0x10,0x7A});
-  CHECK(crc16CcittFalse(reinterpret_cast<const uint8_t*>("123456789"),9)==0x29B1);
-  CHECK(crc16CcittFalse(nullptr,0)==0xFFFF); CHECK(crc16CcittFalse(hello.data()+2,11)==0xC1DA);
-  CHECK(decode(hello).session_id==0x89ABCDEF); CHECK(decode(setone).payload[1]==3);
-  auto af=request(MessageType::Ack,0x1237,0x89ABCDEF); sameBytes(af,ack);
-
-  StreamParser p; Frame f; CHECK(p.feed(hello[0],f)==StreamParser::Result::None);
-  for(std::size_t i=1;i<hello.size()-1;++i)CHECK(p.feed(hello[i],f)==StreamParser::Result::None);
-  CHECK(p.feed(hello.back(),f)==StreamParser::Result::FrameReady);
-  for(auto b:hello) { auto result=p.feed(b,f); if(b==hello.back())CHECK(result==StreamParser::Result::FrameReady); }
-  for(auto b:hello) p.feed(b,f);
-  for(auto b:setone) { if(p.feed(b,f)==StreamParser::Result::FrameReady)CHECK(f.message_type==6); }
-  p.reset(); p.feed(0x12,f); p.feed(0xA5,f); p.feed(0x33,f); for(auto b:hello) if(p.feed(b,f)==StreamParser::Result::FrameReady)CHECK(f.message_type==1);
-  auto bad=hello; bad.back()^=1; p.reset(); bool got=false; for(auto b:bad)p.feed(b,f); for(auto b:setone)got|=p.feed(b,f)==StreamParser::Result::FrameReady; CHECK(got);
-  p.reset(); std::vector<uint8_t> oversized={0xA5,0x5A,1,1,7,0,0,0,0,0,0,65,0}; for(auto b:oversized)p.feed(b,f); got=false; for(auto b:hello)got|=p.feed(b,f)==StreamParser::Result::FrameReady; CHECK(got);
-  p.reset(); p.feed(0xA5,f); for(auto b:hello)got|=p.feed(b,f)==StreamParser::Result::FrameReady;
-
-  FakeOutputs outputs; outputs.states.fill(true); CommandProcessor cp(7,0x0102,outputs); CHECK(cp.initialize()); CHECK(outputs.initialized); for(bool s:outputs.states)CHECK(!s);
-  Frame out; CHECK(cp.process(request(MessageType::SetOutputs),out)); CHECK(out.payload[0]==uint8_t(NackCode::BadSession));
-  CHECK(cp.process(request(MessageType::Hello,1,9),out)); CHECK(cp.sessionActive()); CHECK(out.message_type==2);
-  const int hello_resets=outputs.resets; CHECK(cp.process(request(MessageType::Hello,8,9),out)); CHECK(outputs.resets==hello_resets);
-  CHECK(cp.process(request(MessageType::SetOutputs,9,99,{1,0,1}),out)); CHECK(out.payload[0]==uint8_t(NackCode::BadSession)); CHECK(!outputs.states[0]);
-  auto other=request(MessageType::SetOutputs,9,9,{1,0,1}); other.slave_address=8; CHECK(!cp.process(other,out)); CHECK(!outputs.states[0]);
-  CHECK(cp.process(request(MessageType::SetOutputs,2,9,{1,1,1}),out)); CHECK(outputs.states[1]); CHECK(out.message_type==7);
-  int applies=outputs.applies; CHECK(cp.process(request(MessageType::SetOutputs,2,9,{1,1,1}),out)); CHECK(outputs.applies==applies);
-  outputs.states[2]=true; CHECK(cp.process(request(MessageType::Hello,3,10),out)); CHECK(!outputs.states[2]);
-  CHECK(cp.process(request(MessageType::SetOutputs,0xFFFF,10,{2,0,1,2,1}),out)); CHECK(cp.process(request(MessageType::SetOutputs,0,10,{1,0,0}),out)); CHECK(!outputs.states[0]);
-  auto before=outputs.states; CHECK(cp.process(request(MessageType::SetOutputs,1,10,{2,0,1,9,1}),out)); CHECK(outputs.states==before); CHECK(out.payload[0]==3);
-  CHECK(cp.process(request(MessageType::SetOutputs,2,10,{1,0,2}),out)); CHECK(outputs.states==before); CHECK(out.payload[0]==4);
-  CHECK(cp.process(request(MessageType::SetOutputs,3,10,{2,0,1,0,0}),out)); CHECK(outputs.states==before); CHECK(out.payload[0]==2);
-  CHECK(cp.process(request(MessageType::SetOutputs,4,10,{3,0,1,1,1,3,1}),out)); CHECK(outputs.states[0]&&outputs.states[1]&&outputs.states[3]);
-  CHECK(cp.process(request(MessageType::Ping,5,10,{0x40,0x30,0x20,0x10}),out)); CHECK(out.message_type==4&&out.payload[3]==0x10);
-  CHECK(cp.process(request(MessageType::GetStatus,6,10),out)); CHECK(out.message_type==10&&out.payload[3]==4&&out.payload[6]==1&&(out.payload[7]&0x0B)==0x0B);
-  CHECK(cp.process(request(MessageType::ResetOutputs,7,10),out)); for(bool s:outputs.states)CHECK(!s);
-  std::puts("All Pico slave host tests passed");
-}
+#define CHECK(x) do{if(!(x)){std::fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x);std::exit(1);}}while(0)
+class Outputs:public OutputController{public:bool initialize()override{states.fill(false);return true;}bool resetAll()override{states.fill(false);++resets;return true;}bool validateOutput(uint8_t x)const override{return x<4;}bool applyBatch(const OutputUpdate*u,size_t n)override{++applies;for(size_t i=0;i<n;i++)states[u[i].output_id]=u[i].on;return true;}size_t configuredCount()const override{return 4;}bool readState(uint8_t x,bool&o)const override{if(x>=4)return false;o=states[x];return true;}std::array<bool,4>states{};int resets{},applies{};};
+Frame command(MessageType t,uint16_t seq,std::initializer_list<uint8_t>p={}){Frame f;f.message_type=uint8_t(t);f.slave_address=7;f.sequence=seq;f.session_id=0x89abcdef;f.payload_length=p.size();size_t i=0;for(auto x:p)f.payload[i++]=x;return f;}
+std::vector<uint8_t> bytes(const Frame&f){std::array<uint8_t,kMaxFrameSize>b{};auto n=encodeFrame(f,b);return {b.begin(),b.begin()+n};}
+void golden(const Frame&f,std::initializer_list<uint8_t>want){auto got=bytes(f);CHECK(got==std::vector<uint8_t>(want));Frame d;CHECK(decodeFrame(got.data(),got.size(),d));CHECK(d.sequence==f.sequence);}
+int main(){CHECK(crc16CcittFalse((const uint8_t*)"123456789",9)==0x29b1);
+ golden(command(MessageType::ResetOutputs,0x1234),{0xA5,0x5A,2,5,7,0x34,0x12,0xEF,0xCD,0xAB,0x89,0,0,0x15,0x14});
+ golden(command(MessageType::SetOutputs,0x1235,{1,3,1}),{0xA5,0x5A,2,6,7,0x35,0x12,0xEF,0xCD,0xAB,0x89,3,0,1,3,1,0x59,0xE8});
+ golden(command(MessageType::SetOutputs,0x1236,{3,1,1,2,0,3,1}),{0xA5,0x5A,2,6,7,0x36,0x12,0xEF,0xCD,0xAB,0x89,7,0,3,1,1,2,0,3,1,0x05,0xFD});
+ Outputs o;o.states.fill(true);CommandProcessor cp(7,1,o);CHECK(cp.initialize());for(bool x:o.states)CHECK(!x);auto set=command(MessageType::SetOutputs,1,{2,0,1,2,1});cp.noteFrame();CHECK(cp.process(set)==CommandResult::SetApplied);CHECK(o.states[0]&&o.states[2]);auto applications=o.applies;cp.noteFrame();CHECK(cp.process(set)==CommandResult::Duplicate);CHECK(o.applies==applications);auto before=o.states;CHECK(cp.process(command(MessageType::SetOutputs,2,{2,0,0,0,1}))==CommandResult::Invalid);CHECK(o.states==before);CHECK(cp.process(command(MessageType::SetOutputs,3,{1,9,1}))==CommandResult::Invalid);CHECK(o.states==before);CHECK(cp.process(command(MessageType::SetOutputs,4,{1,0,2}))==CommandResult::Invalid);CHECK(o.states==before);std::vector<uint8_t>too(63);too[0]=31;auto over=command(MessageType::SetOutputs,5);over.payload_length=63;for(size_t i=0;i<63;i++)over.payload[i]=too[i];over.payload[0]=32;CHECK(cp.process(over)==CommandResult::Invalid);CHECK(cp.process(command(MessageType::ResetOutputs,6))==CommandResult::ResetApplied);for(bool x:o.states)CHECK(!x);
+ StreamParser parser;Frame f;auto wire=bytes(set);for(size_t i=0;i+1<wire.size();i++)CHECK(parser.feed(wire[i],f)==StreamParser::Result::None);CHECK(parser.feed(wire.back(),f)==StreamParser::Result::FrameReady);auto bad=wire;bad.back()^=1;parser.reset();bool crc=false;for(auto x:bad)crc|=parser.feed(x,f)==StreamParser::Result::CrcError;CHECK(crc);auto old=wire;old[2]=1;auto oldCrc=crc16CcittFalse(old.data()+2,old.size()-4);old[old.size()-2]=uint8_t(oldCrc);old.back()=uint8_t(oldCrc>>8);parser.reset();bool invalid=false;for(auto x:old)invalid|=parser.feed(x,f)==StreamParser::Result::InvalidFrame;CHECK(invalid);parser.reset();for(auto x:{uint8_t(9),uint8_t(8),uint8_t(7)})parser.feed(x,f);bool recovered=false;for(auto x:wire)recovered|=parser.feed(x,f)==StreamParser::Result::FrameReady;CHECK(recovered);parser.reset();std::vector<uint8_t>oversized={0xA5,0x5A,2,6,7,0,0,0,0,0,0,65,0};for(auto x:oversized)invalid|=parser.feed(x,f)==StreamParser::Result::InvalidFrame;CHECK(invalid);
+ cp.noteBytes(wire.size());cp.noteCrcError();cp.noteInvalidFrame();CHECK(cp.counters().bytesReceived==wire.size());CHECK(cp.counters().crcErrors==1&&cp.counters().invalidFrames>=1&&cp.counters().setCommandsApplied==1&&cp.counters().resetCommandsApplied==1);std::puts("All Pico v2 host tests passed");}

@@ -4,11 +4,10 @@
 #include <cstdint>
 
 namespace master::protocol {
-constexpr uint8_t kVersion = 1;
+constexpr uint8_t kVersion = 2;
 constexpr size_t kMaxPayload = 64;
 constexpr size_t kMaxFrame = 15 + kMaxPayload;
-enum class Type : uint8_t { Hello=1, HelloAck=2, Ping=3, Pong=4, ResetOutputs=5,
-  SetOutputs=6, Ack=7, Nack=8, GetStatus=9, Status=10 };
+enum class Type : uint8_t { ResetOutputs=5, SetOutputs=6 };
 struct Frame { Type type{}; uint8_t address{}; uint16_t sequence{}; uint32_t session{};
   std::array<uint8_t,kMaxPayload> payload{}; uint16_t payload_size{}; };
 struct Bytes { std::array<uint8_t,kMaxFrame> data{}; size_t size{}; };

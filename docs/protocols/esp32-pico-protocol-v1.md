@@ -1,3 +1,5 @@
+> **Deprecated:** this bidirectional prototype is retained for history. Production hardware uses the one-way [protocol v2](esp32-pico-protocol-v2.md).
+
 # ESP32 Master ↔ Raspberry Pi Pico Protocol v1
 
 Status: **stable host reference**, version `1`. This document is normative for future ESP32 and Pico implementations. TypeScript implements framing and semantics only, not UART.

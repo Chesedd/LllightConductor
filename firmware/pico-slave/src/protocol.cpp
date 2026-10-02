@@ -24,7 +24,7 @@ uint16_t crc16CcittFalse(const uint8_t* data, std::size_t length) {
 }
 
 bool decodeFrame(const uint8_t* b, std::size_t length, Frame& f) {
-  if (length < 15 || b[0] != kMagic0 || b[1] != kMagic1) return false;
+  if (length < 15 || b[0] != kMagic0 || b[1] != kMagic1 || b[2] != kProtocolVersion || b[4] == 255) return false;
   const uint16_t payload_length = read16(b + 11);
   if (payload_length > kMaxPayload || length != kHeaderSize + payload_length + 2) return false;
   if (read16(b + kHeaderSize + payload_length) != crc16CcittFalse(b + 2, 11 + payload_length)) return false;

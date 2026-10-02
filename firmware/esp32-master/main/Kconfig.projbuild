@@ -3,6 +3,14 @@ config LLLIGHT_DEMO_AUTO_START
     bool "Auto-start demo when READY (bench use only)"
     default n
 endmenu
+menu "One-way Pico transport"
+config LLLIGHT_PICO_UART_PORT
+    int "Pico UART number"
+    default 1
+config LLLIGHT_PICO_UART_TX_PIN
+    int "TX GPIO connected to configured Pico RX GPIO"
+    default 18
+endmenu
 menu "Desktop serial transport"
 config LLLIGHT_DESKTOP_UART_PORT
     int "Dedicated desktop UART number"
