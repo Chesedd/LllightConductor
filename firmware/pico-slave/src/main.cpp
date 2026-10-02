@@ -111,6 +111,7 @@ int main() {
           printf("RX INVALID_FRAME\n");
         }
 #endif
+#endif  // PICO_SLAVE_DIAGNOSTICS || PICO_SLAVE_RAW_RX_LED_DIAGNOSTIC
       }
     }
 
