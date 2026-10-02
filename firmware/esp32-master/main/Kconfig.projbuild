@@ -10,6 +10,9 @@ config LLLIGHT_PICO_UART_PORT
 config LLLIGHT_PICO_UART_TX_PIN
     int "TX GPIO connected to configured Pico RX GPIO"
     default 18
+config LLLIGHT_PICO_BENCH_RESET_LOOP
+    bool "Send RESET_OUTPUTS to Pico every second for physical UART bench testing"
+    default n
 endmenu
 menu "Desktop serial transport"
 config LLLIGHT_DESKTOP_UART_PORT

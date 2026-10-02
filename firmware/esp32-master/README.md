@@ -15,3 +15,13 @@ configured count separately.
 
 See `docs/protocols/esp32-pico-protocol-v2.md` for framing, limitations, golden
 vectors, Pico USB/LED diagnostics, and the hardware verification procedure.
+
+## Pico UART bench reset loop
+
+The compile-time option `CONFIG_LLLIGHT_PICO_BENCH_RESET_LOOP` is disabled by
+default. Enable it under **One-way Pico transport** in `idf.py menuconfig` to
+send a Protocol v2 `RESET_OUTPUTS` to slave address 7 about once per second.
+The loop uses `PicoCommandSender` and timestamp-based scheduling, so normal main
+loop processing continues. Console `result=OK` means only that the ESP32 UART
+accepted the local transmission; the Pico receive LED is the physical receive
+and apply indication.
