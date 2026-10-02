@@ -6,6 +6,7 @@
 #include "master/show_controller.hpp"
 #include "master/uart_transport.hpp"
 #include "esp_log.h"
+#include "esp_random.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -29,6 +30,9 @@ extern "C" void app_main(){
   if(controller.state()==ShowState::Ready)controller.start();
 #endif
   int64_t wait_us=1000;if(controller.state()==ShowState::Running&&scheduler.next_deadline_us()>0){auto remaining=scheduler.next_deadline_us()-clock.now_us();if(remaining>2000)wait_us=remaining-1000;}
-  vTaskDelay(pdMS_TO_TICKS(wait_us/1000>0?wait_us/1000:1));
+  const auto delay_ms=wait_us/1000>0?wait_us/1000:1;
+  TickType_t delay_ticks=pdMS_TO_TICKS(delay_ms);
+  if(delay_ticks==0)delay_ticks=1;
+  vTaskDelay(delay_ticks);
  }
 }
