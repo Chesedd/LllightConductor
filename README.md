@@ -23,8 +23,8 @@ apps/desktop/              React UI и Tauri host
     score/                минимальная модель партитуры/timeline
     ui/                    shell, навигация и экраны
   src-tauri/               минимальный нативный Tauri host
-firmware/esp32-master/     ESP32 scheduler, Pico sessions и portable Desktop Protocol v1
-firmware/pico-slave/       Pico Protocol v1 slave firmware
+firmware/esp32-master/     ESP32 scheduler, one-way Pico Protocol v2 sender и portable Desktop Protocol v1
+firmware/pico-slave/       Pico Protocol v2 RX-only slave firmware
 docs/architecture/         архитектурные решения
 docs/protocols/            место для будущих спецификаций протоколов
 docs/formats/              место для будущих форматов

@@ -64,7 +64,7 @@ describe('desktop application shell', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Add Pico' }).at(-1)!); fireEvent.click(screen.getAllByRole('button', { name: 'Add Pico' }).at(-1)!);
     fireEvent.click(screen.getAllByRole('button', { name: 'Add Channel' }).at(-1)!); fireEvent.change(screen.getByLabelText('Hardware output identifier'), { target: { value: 'GP15' } }); fireEvent.click(screen.getAllByRole('button', { name: 'Add Channel' }).at(-1)!);
     fireEvent.click(screen.getByText('EL Wire Channel'));
-    expect(screen.getByLabelText('Pico Output ID')).toHaveValue(''); expect(screen.getByText(/Numeric output ID used by Pico Protocol v1/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Pico Output ID')).toHaveValue(''); expect(screen.getByText(/Numeric output ID used by Pico Protocol v2/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Pico Output ID'), { target: { value: '256' } }); fireEvent.click(screen.getByRole('button', { name: 'Apply changes' })); expect(screen.getByRole('alert')).toHaveTextContent('0 to 255');
     fireEvent.change(screen.getByLabelText('Pico Output ID'), { target: { value: '0' } }); fireEvent.click(screen.getByRole('button', { name: 'Apply changes' }));
     expect(screen.getByRole('button', { name: 'Prepare for Hardware' })).toBeDisabled(); fireEvent.click(screen.getByRole('button', { name: 'Compile' })); fireEvent.click(screen.getByRole('button', { name: 'Done' })); expect(screen.getByRole('button', { name: 'Prepare for Hardware' })).toBeEnabled();

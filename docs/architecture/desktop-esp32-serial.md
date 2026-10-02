@@ -12,7 +12,7 @@ Port metadata (type, VID/PID, manufacturer, product and serial number where the 
 
 ## Firmware physical transport
 
-The baseline production adapter uses a dedicated ESP-IDF UART at 460800 8-N-1. Defaults are UART2, TX GPIO25 and RX GPIO26 and are explicit menuconfig values. A USB-to-3.3 V UART bridge exposes it to the PC. Pico traffic remains on UART1/GPIO17/GPIO16, and ESP-IDF logs remain on the configured console; binary protocol and text logs must never share a stream. Not every ESP32 variant has UART2 or these GPIOs, so select a compatible port/pins for the actual board. Native USB Serial/JTAG can be added behind the same boundary after a target board is fixed.
+The baseline production adapter uses a dedicated ESP-IDF UART at 460800 8-N-1. Defaults are UART2, TX GPIO25 and RX GPIO26 and are explicit menuconfig values. A USB-to-3.3 V UART bridge exposes it to the PC. One-way Pico traffic uses UART1 TX on GPIO18 (no RX pin), and ESP-IDF logs remain on the configured console; binary protocol and text logs must never share a stream. Not every ESP32 variant has UART2 or these GPIOs, so select a compatible port/pins for the actual board. Native USB Serial/JTAG can be added behind the same boundary after a target board is fixed.
 
 The stable 128-bit device ID is the first 16 bytes of SHA-256 over the domain string `lllight-device-v1` plus the factory eFuse base MAC. The MAC is not treated as a secret. Shows and connection state remain volatile across reboot.
 
@@ -24,12 +24,12 @@ Upload selects only the prepared artifact for the bound Master. It sends BEGIN, 
 
 ## Manual hardware test
 
-1. Build and flash the Pico firmware; wire Pico UART1 GP4/GP5 and ground to ESP32 UART1 GPIO17/GPIO16 as documented. For the first test, connect GP10–GP13 only to ordinary LEDs through suitable current-limiting resistors (or a logic analyzer). Do **not** connect an EL inverter yet; move to a suitable MOSFET/relay driver only after the GPIO sequence and all-OFF behavior are confirmed.
+1. Build and flash the Pico firmware; wire ESP32 GPIO18 to the configured Pico UART RX GPIO (GP5 by default) and connect ground; do not connect a reverse UART line. For the first test, connect GP10–GP13 only to ordinary LEDs through suitable current-limiting resistors (or a logic analyzer). Do **not** connect an EL inverter yet; move to a suitable MOSFET/relay driver only after the GPIO sequence and all-OFF behavior are confirmed.
 2. Select the real ESP32 target and configure the dedicated desktop UART/pins in `idf.py menuconfig`.
 3. Build and flash ESP32. Keep its debug console separate from the desktop UART.
 4. Connect a 3.3 V USB-UART bridge to the configured desktop TX/RX (cross TX/RX) and common ground, then connect it to the PC.
 5. Open the desktop app, visit **Devices**, choose **Refresh Ports**, select the bridge and **Connect**.
-6. Verify Device ID, firmware, protocol, state and Pico online/configured counts.
+6. Verify Device ID, firmware, protocol, state and Pico feedback unavailable/configured count.
 7. Open/create a project, then bind the connected ID to the intended Costume / Master.
 8. In the editor run **Compile**, then **Prepare**.
 9. Return to Devices and choose **Upload & Activate**. Verify progress completes and local/device hashes match.

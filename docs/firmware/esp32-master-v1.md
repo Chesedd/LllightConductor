@@ -1,3 +1,5 @@
+> **Historical v1 design:** retained for reference; current production firmware is documented by `docs/protocols/esp32-pico-protocol-v2.md` and the firmware README files.
+
 # ESP32 Master firmware v1
 
 ## Scope and architecture
