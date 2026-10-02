@@ -16,3 +16,18 @@ The target artifact is `pico_slave.uf2`. Diagnostics default ON: complete-frame
 logs use USB CDC and successful applies pulse the onboard LED for 35 ms without
 blocking. Disable production diagnostics with `-DPICO_SLAVE_DIAGNOSTICS=OFF`.
 See `docs/protocols/esp32-pico-protocol-v2.md` for framing and bring-up steps.
+
+For temporary physical UART troubleshooting, enable the compile-time option (it
+defaults to `OFF`):
+
+```sh
+cmake -S firmware/pico-slave -B build/pico-raw-rx \
+  -DPICO_BOARD=pico -DPICO_SLAVE_RAW_RX_LED_DIAGNOSTIC=ON
+cmake --build build/pico-raw-rx
+```
+
+In this mode, an onboard LED pulse of 175 ms means raw UART bytes were received,
+a 650 ms pulse means a valid command was applied, and no pulse means no UART
+bytes were observed. The deadlines are non-blocking; a valid command replaces
+the short receive pulse with the longer pulse. This mode adds no UART response
+or ACK/NACK and does not alter Protocol v2 processing.
