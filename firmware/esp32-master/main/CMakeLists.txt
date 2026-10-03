@@ -5,4 +5,4 @@ idf_component_register(
        "../src/prepared_binary.cpp" "../src/desktop_command_processor.cpp" "../src/esp_desktop_uart.cpp"
        "../src/device_identity.cpp" "../src/esp_desktop_tcp.cpp" "../src/esp_remote_maintenance.cpp"
   INCLUDE_DIRS "../include"
-  REQUIRES esp_wifi esp_netif nvs_flash lwip app_update mbedtls esp_timer)
+  REQUIRES esp_wifi esp_netif nvs_flash lwip app_update mbedtls esp_timer esp_driver_uart)
