@@ -34,3 +34,31 @@ local STA SSID/password. Credentials are local build configuration: never commit
 real credentials. The default port is 3333. After DHCP, the monitor prints
 `Desktop TCP listening on <assigned-ip>:3333`. One client is accepted at a time;
 disconnect returns the server to listening and does not alter scheduler/show state.
+
+## Remote maintenance
+
+Runtime Wi-Fi credentials and the Desktop TCP port are stored in NVS namespace
+`lllight_net` under `ssid`, `password`, and `tcp_port`. Kconfig values are used only
+as bootstrap defaults until the first saved configuration. Passwords are neither
+logged nor returned by Desktop Protocol v1.
+
+## First OTA-capable installation
+
+Existing devices use a single-app partition table. **Once after merging this
+change, flash the device over USB** so the bootloader, OTA partition table, and
+application are all replaced. After that migration, application `.bin` updates
+can use **Devices → Firmware**. Application OTA never rewrites the bootloader,
+partition table, or NVS.
+
+## Recovery
+
+If the configured SSID is empty or STA does not receive an IP in about 15 seconds,
+the device keeps APSTA mode active until reboot and exposes the open AP
+`Lllight-Recovery-XXXXXX`. Connect the PC to it, then connect Desktop to
+`192.168.4.1:3333`, change Network settings, and restart the ESP32.
+
+## Limitations
+
+Remote maintenance is intended for a trusted LAN: raw TCP currently has no TLS or
+authentication. OTA updates applications only. Bootloader and partition-table
+updates continue to require USB.
