@@ -25,3 +25,12 @@ The loop uses `PicoCommandSender` and timestamp-based scheduling, so normal main
 loop processing continues. Console `result=OK` means only that the ESP32 UART
 accepted the local transmission; the Pico receive LED is the physical receive
 and apply indication.
+
+## Desktop TCP/Wi-Fi transport
+
+The production default remains the dedicated Desktop UART. To use raw TCP, run
+`idf.py menuconfig`, choose **Desktop transport → TCP over Wi-Fi**, and enter the
+local STA SSID/password. Credentials are local build configuration: never commit
+real credentials. The default port is 3333. After DHCP, the monitor prints
+`Desktop TCP listening on <assigned-ip>:3333`. One client is accepted at a time;
+disconnect returns the server to listening and does not alter scheduler/show state.

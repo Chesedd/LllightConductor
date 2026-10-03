@@ -1,5 +1,6 @@
 #include "master/desktop_command_processor.hpp"
 #include "master/esp_desktop_uart.hpp"
+#include "master/esp_desktop_tcp.hpp"
 #include "master/prepared_show.hpp"
 #include "master/scheduler.hpp"
 #include "master/pico_command_sender.hpp"
@@ -19,7 +20,12 @@ extern "C" void app_main(){
 #endif
  static constexpr UartConfig pico_uart_config{uart_port_t(CONFIG_LLLIGHT_PICO_UART_PORT),CONFIG_LLLIGHT_PICO_UART_TX_PIN,UART_PIN_NO_CHANGE,kPicoBaud,kBenchSlaveAddress};
  static EspUartTransport uart(pico_uart_config);static EspClock clock;if(!uart.init()){ESP_LOGE("master","Pico UART init failed");return;}
- static EspDesktopUart desktop(DesktopUartConfig{CONFIG_LLLIGHT_DESKTOP_UART_PORT,CONFIG_LLLIGHT_DESKTOP_UART_TX_PIN,CONFIG_LLLIGHT_DESKTOP_UART_RX_PIN,460800}); if(!desktop.init()){ESP_LOGE("master","Desktop UART init failed");return;}
+ #ifdef CONFIG_LLLIGHT_DESKTOP_TRANSPORT_TCP
+ static EspDesktopTcp desktop(DesktopTcpConfig{CONFIG_LLLIGHT_DESKTOP_WIFI_SSID,CONFIG_LLLIGHT_DESKTOP_WIFI_PASSWORD,CONFIG_LLLIGHT_DESKTOP_TCP_PORT});
+#else
+ static EspDesktopUart desktop(DesktopUartConfig{CONFIG_LLLIGHT_DESKTOP_UART_PORT,CONFIG_LLLIGHT_DESKTOP_UART_TX_PIN,CONFIG_LLLIGHT_DESKTOP_UART_RX_PIN,460800});
+#endif
+ if(!desktop.init()){ESP_LOGE("master","Desktop transport init failed");return;}
  static PicoCommandSender sender(uart,esp_random());static ShowScheduler* scheduler_ptr=nullptr;
 #ifdef CONFIG_LLLIGHT_PICO_BENCH_RESET_LOOP
  if(!sender.add_slave(kBenchSlaveAddress)){ESP_LOGE("master","PICO BENCH failed to register slave=%u",unsigned(kBenchSlaveAddress));return;}
