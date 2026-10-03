@@ -9,4 +9,11 @@ export const activateShow=(sequence:number,sessionId:number,hash:Uint8Array)=>re
 export const startShow=(sequence:number,sessionId:number)=>requestFrame(DesktopMessageType.START_SHOW,sequence,sessionId);
 export const stopShow=(sequence:number,sessionId:number)=>requestFrame(DesktopMessageType.STOP_SHOW,sequence,sessionId);
 export const getStatus=(sequence:number,sessionId:number)=>requestFrame(DesktopMessageType.GET_STATUS,sequence,sessionId);
+export const getNetworkConfig=(sequence:number,sessionId:number)=>requestFrame(DesktopMessageType.GET_NETWORK_CONFIG,sequence,sessionId);
+export function setNetworkConfig(sequence:number,sessionId:number,ssid:string,password:string|undefined,tcpPort:number){const e=new TextEncoder(),s=e.encode(ssid),p=password===undefined?new Uint8Array():e.encode(password);if(s.length>32||p.length>63||tcpPort<1||tcpPort>65535)throw new Error('Invalid network settings.');const{b,v}=payload(6+s.length+p.length);b[0]=1;b[1]=s.length;b.set(s,2);b[2+s.length]=password===undefined?0:1;b[3+s.length]=p.length;b.set(p,4+s.length);v.setUint16(4+s.length+p.length,tcpPort,true);return requestFrame(DesktopMessageType.SET_NETWORK_CONFIG,sequence,sessionId,b);}
+export const rebootDevice=(sequence:number,sessionId:number)=>requestFrame(DesktopMessageType.REBOOT_DEVICE,sequence,sessionId);
+export function beginFirmwareUpdate(sequence:number,sessionId:number,totalLength:number,hash:Uint8Array){const f=beginUpload(sequence,sessionId,totalLength,hash);f.messageType=DesktopMessageType.BEGIN_FIRMWARE_UPDATE;return f;}
+export function firmwareUpdateChunk(sequence:number,sessionId:number,offset:number,data:Uint8Array){const f=uploadChunk(sequence,sessionId,offset,data);f.messageType=DesktopMessageType.FIRMWARE_UPDATE_CHUNK;return f;}
+export const endFirmwareUpdate=(sequence:number,sessionId:number)=>requestFrame(DesktopMessageType.END_FIRMWARE_UPDATE,sequence,sessionId);
+export const cancelFirmwareUpdate=(sequence:number,sessionId:number)=>requestFrame(DesktopMessageType.CANCEL_FIRMWARE_UPDATE,sequence,sessionId);
 export function response(request:DesktopFrame,type:number,payload:Uint8Array=new Uint8Array()):DesktopFrame{return requestFrame(type,request.sequence,request.sessionId,payload);}
