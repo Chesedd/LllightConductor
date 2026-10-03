@@ -60,3 +60,29 @@ npm run build
 декодер Prepared Master Binary v1, activation/control/status и интеграцию с
 существующим Pico scheduler. Настоящий Desktop Serial transport, COM discovery и UI
 подключения/загрузки пока намеренно отсутствуют.
+
+## ESP32 Desktop transport over Wi-Fi
+
+Desktop Protocol v1 can use either its existing dedicated UART (the default) or a
+raw TCP byte stream. The transport changes only how bytes travel: framing, CRC,
+sessions, retry behavior, commands, Prepared Master Binary v1, and the one-way
+ESP32 → Pico Protocol v2 are unchanged. A TCP disconnect never stops a running
+show; execution and timing remain local to the ESP32.
+
+Wi-Fi bench flow:
+
+1. Run `idf.py menuconfig` in `firmware/esp32-master`.
+2. Select **Desktop transport → TCP over Wi-Fi**.
+3. Set the Wi-Fi SSID and password (and optionally change TCP port `3333`).
+4. Build and flash the ESP32.
+5. Run `idf.py monitor`.
+6. Read the assigned IP from `Desktop TCP listening on <IP>:3333`.
+7. Open **Desktop → Devices → Network**.
+8. Enter the IP and port `3333`, then Connect.
+9. Bind the connected stable ESP32 device ID to a Master.
+10. Use **Upload & Activate**.
+11. Use **Start Show** (and **Stop Show** while connected).
+
+Wi-Fi credentials are local build configuration. **Do not commit real credentials.**
+The firmware uses station mode with reconnect; it does not create a SoftAP and it
+never logs the password.

@@ -2,6 +2,7 @@ use serde::Serialize;
 use std::{
     fs,
     io::{Read, Write},
+    net::{Shutdown, TcpStream, ToSocketAddrs},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU32, Ordering},
@@ -23,6 +24,19 @@ struct OpenSerial {
     generation: u32,
     port_name: String,
     writer: Box<dyn serialport::SerialPort>,
+    stop: Arc<AtomicBool>,
+    reader: Option<JoinHandle<()>>,
+}
+
+#[derive(Default)]
+struct TcpState {
+    open: Mutex<Option<OpenTcp>>,
+    next_generation: AtomicU32,
+}
+struct OpenTcp {
+    generation: u32,
+    endpoint: String,
+    writer: TcpStream,
     stop: Arc<AtomicBool>,
     reader: Option<JoinHandle<()>>,
 }
@@ -269,6 +283,178 @@ fn close_serial_port(
     Ok(())
 }
 
+fn connect_tcp(host: &str, port: u16) -> Result<TcpStream, SerialCommandError> {
+    if host.trim().is_empty() {
+        return Err(SerialCommandError::new("OpenFailed", "TCP host is empty"));
+    }
+    let endpoint = format!("{}:{port}", host.trim());
+    let addresses = endpoint.to_socket_addrs().map_err(|e| {
+        SerialCommandError::new("OpenFailed", format!("cannot resolve {endpoint}: {e}"))
+    })?;
+    let mut last = None;
+    for address in addresses {
+        match TcpStream::connect_timeout(&address, Duration::from_secs(5)) {
+            Ok(stream) => return Ok(stream),
+            Err(error) => last = Some(error),
+        }
+    }
+    Err(SerialCommandError::new(
+        "OpenFailed",
+        format!(
+            "cannot connect to {endpoint}: {}",
+            last.map(|e| e.to_string())
+                .unwrap_or_else(|| "no address found".into())
+        ),
+    ))
+}
+
+#[tauri::command]
+async fn open_tcp_connection(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, TcpState>,
+    host: String,
+    port: u16,
+) -> Result<u32, SerialCommandError> {
+    let stream = tauri::async_runtime::spawn_blocking(move || connect_tcp(&host, port))
+        .await
+        .map_err(|e| SerialCommandError::new("OpenFailed", e.to_string()))??;
+    stream
+        .set_read_timeout(Some(Duration::from_millis(100)))
+        .map_err(|e| SerialCommandError::new("OpenFailed", e.to_string()))?;
+    stream
+        .set_nodelay(true)
+        .map_err(|e| SerialCommandError::new("OpenFailed", e.to_string()))?;
+    let mut reader = stream
+        .try_clone()
+        .map_err(|e| SerialCommandError::new("OpenFailed", e.to_string()))?;
+    let endpoint = stream
+        .peer_addr()
+        .map(|a| a.to_string())
+        .unwrap_or_else(|_| "TCP peer".into());
+    let mut slot = state
+        .open
+        .lock()
+        .map_err(|_| SerialCommandError::new("OpenFailed", "TCP state poisoned"))?;
+    if slot.is_some() {
+        return Err(SerialCommandError::new(
+            "PortBusy",
+            "another TCP connection is already open",
+        ));
+    }
+    let generation = state.next_generation.fetch_add(1, Ordering::Relaxed);
+    let stop = Arc::new(AtomicBool::new(false));
+    let reader_stop = stop.clone();
+    let reader_endpoint = endpoint.clone();
+    let handle = std::thread::spawn(move || {
+        let mut bytes = [0u8; 4096];
+        while !reader_stop.load(Ordering::Acquire) {
+            match reader.read(&mut bytes) {
+                Ok(0) => {
+                    if !reader_stop.load(Ordering::Acquire) {
+                        let _ = app.emit(
+                            "tcp://disconnect",
+                            SerialDisconnectEvent {
+                                generation,
+                                error: SerialCommandError::new(
+                                    "Disconnected",
+                                    format!("{reader_endpoint}: peer closed connection"),
+                                ),
+                            },
+                        );
+                    }
+                    break;
+                }
+                Ok(n) => {
+                    let _ = app.emit(
+                        "tcp://bytes",
+                        SerialBytesEvent {
+                            generation,
+                            bytes: bytes[..n].to_vec(),
+                        },
+                    );
+                }
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                    ) => {}
+                Err(e) => {
+                    if !reader_stop.load(Ordering::Acquire) {
+                        let _ = app.emit(
+                            "tcp://disconnect",
+                            SerialDisconnectEvent {
+                                generation,
+                                error: SerialCommandError::new(
+                                    "ReadFailed",
+                                    format!("{reader_endpoint}: {e}"),
+                                ),
+                            },
+                        );
+                    }
+                    break;
+                }
+            }
+        }
+    });
+    *slot = Some(OpenTcp {
+        generation,
+        endpoint,
+        writer: stream,
+        stop,
+        reader: Some(handle),
+    });
+    Ok(generation)
+}
+
+#[tauri::command]
+fn write_tcp(
+    state: tauri::State<TcpState>,
+    generation: u32,
+    bytes: Vec<u8>,
+) -> Result<(), SerialCommandError> {
+    let mut slot = state
+        .open
+        .lock()
+        .map_err(|_| SerialCommandError::new("Disconnected", "TCP state poisoned"))?;
+    let open = slot
+        .as_mut()
+        .ok_or_else(|| SerialCommandError::new("Disconnected", "no TCP connection is open"))?;
+    if open.generation != generation {
+        return Err(SerialCommandError::new(
+            "Disconnected",
+            "TCP connection generation is stale",
+        ));
+    }
+    open.writer
+        .write_all(&bytes)
+        .map_err(|e| SerialCommandError::new("WriteFailed", format!("{}: {e}", open.endpoint)))
+}
+
+#[tauri::command]
+fn close_tcp_connection(
+    state: tauri::State<TcpState>,
+    generation: u32,
+) -> Result<(), SerialCommandError> {
+    let mut slot = state
+        .open
+        .lock()
+        .map_err(|_| SerialCommandError::new("Disconnected", "TCP state poisoned"))?;
+    let mut open = if slot.as_ref().is_some_and(|o| o.generation == generation) {
+        slot.take()
+    } else {
+        None
+    };
+    drop(slot);
+    if let Some(ref mut value) = open {
+        value.stop.store(true, Ordering::Release);
+        let _ = value.writer.shutdown(Shutdown::Both);
+        if let Some(reader) = value.reader.take() {
+            let _ = reader.join();
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn choose_project_to_open() -> Option<String> {
     rfd::FileDialog::new()
@@ -387,6 +573,7 @@ fn replace_file(source: &Path, target: &Path) -> std::io::Result<()> {
 pub fn run() {
     tauri::Builder::default()
         .manage(SerialState::default())
+        .manage(TcpState::default())
         .invoke_handler(tauri::generate_handler![
             choose_project_to_open,
             choose_project_save_path,
@@ -397,7 +584,10 @@ pub fn run() {
             list_serial_ports,
             open_serial_port,
             write_serial,
-            close_serial_port
+            close_serial_port,
+            open_tcp_connection,
+            write_tcp,
+            close_tcp_connection
         ])
         .run(tauri::generate_context!())
         .expect("error while running Lllight Conductor");
@@ -411,6 +601,12 @@ mod tests {
         let _ = fs::remove_dir_all(&path);
         fs::create_dir_all(&path).unwrap();
         path
+    }
+    #[test]
+    fn rejects_empty_tcp_host_without_network_io() {
+        let error = connect_tcp("  ", 3333).unwrap_err();
+        assert_eq!(error.code, "OpenFailed");
+        assert!(error.message.contains("host is empty"));
     }
     #[test]
     fn creates_new_file() {

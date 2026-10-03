@@ -14,14 +14,38 @@ config LLLIGHT_PICO_BENCH_RESET_LOOP
     bool "Send RESET_OUTPUTS to Pico every second for physical UART bench testing"
     default n
 endmenu
-menu "Desktop serial transport"
+menu "Desktop transport"
+choice LLLIGHT_DESKTOP_TRANSPORT
+    prompt "Desktop byte transport"
+    default LLLIGHT_DESKTOP_TRANSPORT_UART
+config LLLIGHT_DESKTOP_TRANSPORT_UART
+    bool "UART"
+config LLLIGHT_DESKTOP_TRANSPORT_TCP
+    bool "TCP over Wi-Fi"
+endchoice
 config LLLIGHT_DESKTOP_UART_PORT
     int "Dedicated desktop UART number"
     default 2
+    depends on LLLIGHT_DESKTOP_TRANSPORT_UART
 config LLLIGHT_DESKTOP_UART_TX_PIN
     int "Desktop UART TX GPIO"
     default 25
+    depends on LLLIGHT_DESKTOP_TRANSPORT_UART
 config LLLIGHT_DESKTOP_UART_RX_PIN
     int "Desktop UART RX GPIO"
     default 26
+    depends on LLLIGHT_DESKTOP_TRANSPORT_UART
+config LLLIGHT_DESKTOP_WIFI_SSID
+    string "Wi-Fi SSID"
+    default ""
+    depends on LLLIGHT_DESKTOP_TRANSPORT_TCP
+config LLLIGHT_DESKTOP_WIFI_PASSWORD
+    string "Wi-Fi password"
+    default ""
+    depends on LLLIGHT_DESKTOP_TRANSPORT_TCP
+config LLLIGHT_DESKTOP_TCP_PORT
+    int "Desktop TCP port"
+    range 1 65535
+    default 3333
+    depends on LLLIGHT_DESKTOP_TRANSPORT_TCP
 endmenu
