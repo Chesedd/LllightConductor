@@ -13,6 +13,7 @@ type Selection = { kind: 'costume'; id: CostumeId } | { kind: 'master' | 'pico';
 type CreateRequest = { kind: 'costume' } | { kind: 'pico'; parentId: ControllerId } | { kind: 'channel'; parentId: ControllerId };
 type DeleteRequest = { selection: Selection; name: string };
 type ScoreClipboard = { events: { channelId: ChannelId; startMs: number; endMs: number }[]; anchorTimeMs: number };
+type Channel = Project['costumes'][number]['master']['slaves'][number]['channels'][number];
 
 export function EditorPage() {
   const app = useAppState(); const { project, navigate, topology, audio, score } = app;
@@ -21,8 +22,9 @@ export function EditorPage() {
   const [deleteRequest, setDeleteRequest] = useState<DeleteRequest | null>(null);
   const [removeAudioRequested, setRemoveAudioRequested] = useState(false);
   const [selectedScoreEventIds, setSelectedScoreEventIds] = useState<Set<EntityId>>(new Set());
+  const [addIntervalChannel, setAddIntervalChannel] = useState<Channel | null>(null);
   const [clipboard, setClipboard] = useState<ScoreClipboard | null>(null); const [snapEnabled, setSnapEnabled] = useState(true); const [gridMs, setGridMs] = useState(100);
-  useEffect(() => { setSelection(null); setSelectedScoreEventIds(new Set()); setClipboard(null); }, [project?.id]);
+  useEffect(() => { setSelection(null); setSelectedScoreEventIds(new Set()); setClipboard(null); setAddIntervalChannel(null); }, [project?.id]);
   useEffect(() => { const existing = new Set(project?.score.events.map(event => event.id)); setSelectedScoreEventIds(current => new Set([...current].filter(id => existing.has(id)))); }, [project]);
   const copy = () => { const events = project?.score.events.filter(event => selectedScoreEventIds.has(event.id)) ?? []; if (!events.length) return; const anchorTimeMs = Math.min(...events.map(event => event.startMs)); setClipboard({ anchorTimeMs, events: events.map(({ channelId, startMs, endMs }) => ({ channelId, startMs, endMs })) }); };
   const pasteAt = (anchor: number) => { if (!clipboard) return; const destination = snapEnabled ? snapTime(anchor, gridMs) : Math.max(0, anchor); const offset = destination - clipboard.anchorTimeMs; const ids = score.addMany(clipboard.events.map(event => ({ ...event, startMs: event.startMs + offset, endMs: event.endMs + offset }))); if (ids) setSelectedScoreEventIds(new Set(ids)); };
@@ -40,11 +42,12 @@ export function EditorPage() {
   return <section className="editor" aria-label={`${project.name} editor`}>
     <EditorToolbar onDuplicate={duplicate} canDuplicate={selectedScoreEventIds.size > 0} />
     <div className="editor-body">
-      <ProjectTree project={project} selection={selection} onSelect={setSelection} onCreate={setCreateRequest} onDelete={(item, name) => setDeleteRequest({ selection: item, name })} />
+      <ProjectTree project={project} selection={selection} onSelect={value => { setSelection(value); setSelectedScoreEventIds(new Set()); }} onCreate={setCreateRequest} onDelete={(item, name) => setDeleteRequest({ selection: item, name })} />
       <div className="timeline-column"><AudioPanel onRemove={() => setRemoveAudioRequested(true)}/><TimelineSurface projectId={project.id} selectedEventIds={selectedScoreEventIds} onSelectEvents={ids => { setSelectedScoreEventIds(ids); if (ids.size) setSelection(null); }} snapEnabled={snapEnabled} gridMs={gridMs} onSnapEnabled={setSnapEnabled} onGridMs={setGridMs}/></div>
-      <Inspector project={project} selection={selection} selectedEventIds={selectedScoreEventIds} onDeleted={() => setSelectedScoreEventIds(new Set())} />
+      <Inspector project={project} selection={selection} selectedEventIds={selectedScoreEventIds} onDeleted={() => setSelectedScoreEventIds(new Set())} onAddInterval={setAddIntervalChannel} />
     </div>
     {createRequest && <CreateDialog request={createRequest} costumeNumber={project.costumes.length + 1} onClose={() => setCreateRequest(null)} />}
+    {addIntervalChannel && <AddScoreEventDialog channel={addIntervalChannel} project={project} startMs={audio.transport.currentTimeMs} onClose={() => setAddIntervalChannel(null)} onAdd={(startMs, endMs) => { const ids = score.addMany([{ channelId: addIntervalChannel.id, startMs, endMs }]); if (!ids) return false; setAddIntervalChannel(null); setSelection(null); setSelectedScoreEventIds(new Set(ids)); return true; }} />}
     {deleteRequest && <ConfirmationDialog title={`Delete ${labelFor(deleteRequest.selection)} “${deleteRequest.name}”?`} description="This also removes its child topology and cannot be undone." confirmLabel="Delete" danger onCancel={() => setDeleteRequest(null)} onConfirm={deleteEntity} />}
     {removeAudioRequested && <ConfirmationDialog title="Remove audio track?" description="The reference will be removed from this project. The audio file on disk will not be deleted." confirmLabel="Remove Audio" danger onCancel={() => setRemoveAudioRequested(false)} onConfirm={() => { audio.removeAudio(); setRemoveAudioRequested(false); }} />}
   </section>;
@@ -111,7 +114,7 @@ function CreateDialog({ request, costumeNumber, onClose }: { request: CreateRequ
   return <div className="dialog-backdrop"><form className="dialog" role="dialog" aria-modal="true" aria-labelledby="create-title" onSubmit={submit}><h2 id="create-title">Add {kind === 'costume' ? 'Costume' : kind === 'pico' ? 'Pico' : 'Channel'}</h2><label htmlFor="new-name">Display name</label><input id="new-name" autoFocus value={name} onChange={event => setName(event.target.value)}/>{kind === 'channel' && <><label htmlFor="new-output">Hardware output identifier</label><input id="new-output" placeholder="GP0, OUT1, CH3…" value={output} onChange={event => setOutput(event.target.value)}/></>}<div className="dialog-actions"><button type="button" className="button secondary" onClick={onClose}>Cancel</button><button className="button primary">Add {kind === 'costume' ? 'Costume' : kind === 'pico' ? 'Pico' : 'Channel'}</button></div></form></div>;
 }
 
-function Inspector({ project, selection, selectedEventIds, onDeleted }: { project: Project; selection: Selection | null; selectedEventIds: ReadonlySet<EntityId>; onDeleted: () => void }) {
+function Inspector({ project, selection, selectedEventIds, onDeleted, onAddInterval }: { project: Project; selection: Selection | null; selectedEventIds: ReadonlySet<EntityId>; onDeleted: () => void; onAddInterval: (channel: Channel) => void }) {
   const { topology, score } = useAppState();
   const selectedEvents = project.score.events.filter(event => selectedEventIds.has(event.id));
   if (selectedEvents.length > 1) { const channels = new Map(project.costumes.flatMap(costume => costume.master.slaves).flatMap(pico => pico.channels).map(channel => [channel.id, channel.displayName])); return <aside className="inspector"><p className="panel-label">EVENT INSPECTOR</p><h2>{selectedEvents.length} intervals selected</h2><div className="property-readonly"><span>Channels</span><strong>{[...new Set(selectedEvents.map(event => channels.get(event.channelId) ?? event.channelId))].join(', ')}</strong></div><div className="property-readonly"><span>Earliest start</span><strong>{formatTimelineTime(Math.min(...selectedEvents.map(event => event.startMs)))}</strong></div><div className="property-readonly"><span>Latest end</span><strong>{formatTimelineTime(Math.max(...selectedEvents.map(event => event.endMs)))}</strong></div><button className="button danger" onClick={() => { if (score.removeMany([...selectedEventIds])) onDeleted(); }}>Delete Intervals</button></aside>; }
@@ -124,7 +127,7 @@ function Inspector({ project, selection, selectedEventIds, onDeleted }: { projec
     for (const pico of costume.master.slaves) {
       if (selection.kind === 'pico' && selection.id === pico.id) return <InspectorForm key={`${selection.kind}-${selection.id}`} title="Pico Controller" id={pico.id} type="Raspberry Pi Pico" fields={[{ label: 'Display name', value: pico.displayName, save: value => topology.renamePico(pico.id, value) }, { label: 'Logical address', value: String(pico.logicalAddress ?? ''), inputMode: 'numeric', save: value => topology.setPicoAddress(pico.id, Number(value)) }]} action={<button type="button" className="button secondary" onClick={() => { if (!pico.channels.some(channel => channel.protocolOutputId !== undefined) || window.confirm('Replace all existing Pico Output IDs with sequential IDs in topology order?')) topology.autoAssignOutputIds(pico.id); }}>Auto Assign Output IDs</button>}/>;
       const channel = pico.channels.find(value => selection.kind === 'channel' && value.id === selection.id);
-      if (channel) return <ChannelInspector key={`${selection.kind}-${selection.id}`} channel={channel} picoName={pico.displayName}/>;
+      if (channel) return <ChannelInspector key={`${selection.kind}-${selection.id}`} channel={channel} picoName={pico.displayName} onAddInterval={() => onAddInterval(channel)}/>;
     }
   }
   return <aside className="inspector"><p className="panel-label">INSPECTOR</p><p className="muted">The selected element no longer exists.</p></aside>;
@@ -136,10 +139,29 @@ function ScoreEventInspector({ event, channelName, onSave, onDelete }: { event: 
   return <aside className="inspector"><p className="panel-label">EVENT INSPECTOR</p><h2>Light Interval</h2><div className="property-readonly"><span>Channel</span><strong>{channelName}</strong></div><form onSubmit={submit}><label className="inspector-field"><span>Start</span><input aria-label="Start" value={start} onChange={e => setStart(e.target.value)}/></label><label className="inspector-field"><span>End</span><input aria-label="End" value={end} onChange={e => setEnd(e.target.value)}/></label>{validation && <p className="field-error" role="alert">{validation}</p>}<button className="button primary">Apply timing</button></form><div className="property-readonly event-duration"><span>Duration</span><strong>{formatTimelineTime(timelineTime(event.endMs - event.startMs))}</strong></div><button className="button danger" onClick={onDelete}>Delete Event</button><div className="stable-id"><span>Stable event ID</span><code>{event.id}</code></div></aside>;
 }
 
-function ChannelInspector({ channel, picoName }: { channel: Project['costumes'][number]['master']['slaves'][number]['channels'][number]; picoName: string }) {
+function ChannelInspector({ channel, picoName, onAddInterval }: { channel: Channel; picoName: string; onAddInterval: () => void }) {
   const { topology } = useAppState(); const [name, setName] = useState(channel.displayName); const [hardware, setHardware] = useState(channel.hardwareOutputIdentifier); const [outputId, setOutputId] = useState(channel.protocolOutputId === undefined ? '' : String(channel.protocolOutputId)); const [validation, setValidation] = useState<string | null>(null);
   const submit = (event: FormEvent) => { event.preventDefault(); let parsed: number | undefined; if (outputId !== '') { if (!/^\d+$/.test(outputId)) { setValidation('Pico Output ID must be an integer from 0 to 255.'); return; } parsed = Number(outputId); if (parsed > 255) { setValidation('Pico Output ID must be an integer from 0 to 255.'); return; } } setValidation(null); if (name !== channel.displayName && !topology.renameChannel(channel.id, name)) return; if (hardware !== channel.hardwareOutputIdentifier && !topology.setChannelOutput(channel.id, hardware)) return; if (parsed !== channel.protocolOutputId) topology.setChannelProtocolOutputId(channel.id, parsed); };
-  return <aside className="inspector"><p className="panel-label">INSPECTOR</p><h2>EL Wire Channel</h2><div className="property-readonly"><span>Controller / channel type</span><strong>el-wire</strong></div><form onSubmit={submit}><label className="inspector-field"><span>Display name</span><input value={name} onChange={event => setName(event.target.value)}/></label><label className="inspector-field"><span>Hardware output identifier</span><input value={hardware} onChange={event => setHardware(event.target.value)}/></label><label className="inspector-field"><span>Pico Output ID</span><input aria-label="Pico Output ID" inputMode="numeric" min={0} max={255} value={outputId} onChange={event => setOutputId(event.target.value)} /><small>Numeric output ID used by Pico Protocol v2 (0–255). Clear to remove the mapping. Pico: {picoName}.</small></label>{validation && <p className="field-error" role="alert">{validation}</p>}<button className="button primary">Apply changes</button></form><div className="stable-id"><span>Stable ID</span><code>{channel.id}</code></div></aside>;
+  return <aside className="inspector"><p className="panel-label">INSPECTOR</p><h2>EL Wire Channel</h2><div className="property-readonly"><span>Controller / channel type</span><strong>el-wire</strong></div><form onSubmit={submit}><label className="inspector-field"><span>Display name</span><input value={name} onChange={event => setName(event.target.value)}/></label><label className="inspector-field"><span>Hardware output identifier</span><input value={hardware} onChange={event => setHardware(event.target.value)}/></label><label className="inspector-field"><span>Pico Output ID</span><input aria-label="Pico Output ID" inputMode="numeric" min={0} max={255} value={outputId} onChange={event => setOutputId(event.target.value)} /><small>Numeric output ID used by Pico Protocol v2 (0–255). Clear to remove the mapping. Pico: {picoName}.</small></label>{validation && <p className="field-error" role="alert">{validation}</p>}<button className="button primary">Apply changes</button></form><section className="inspector-score-action"><p className="panel-label">SCORE</p><button type="button" className="button secondary" onClick={onAddInterval}>+ Add Interval</button></section><div className="stable-id"><span>Stable ID</span><code>{channel.id}</code></div></aside>;
+}
+
+function AddScoreEventDialog({ channel, project, startMs, onClose, onAdd }: { channel: Channel; project: Project; startMs: number; onClose: () => void; onAdd: (startMs: number, endMs: number) => boolean }) {
+  const audioDurationMs = project.audio?.durationMs;
+  const defaultEndMs = audioDurationMs === undefined ? startMs + 1000 : Math.min(startMs + 1000, audioDurationMs);
+  const [start, setStart] = useState(() => formatTimelineTime(timelineTime(startMs)));
+  const [end, setEnd] = useState(() => formatTimelineTime(timelineTime(defaultEndMs)));
+  const [validation, setValidation] = useState<string | null>(null);
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    const parsedStart = parseTimelineTime(start); const parsedEnd = parseTimelineTime(end);
+    if (parsedStart === null || parsedEnd === null) { setValidation('Enter time as MM:SS.mmm, HH:MM:SS.mmm, or milliseconds.'); return; }
+    if (parsedEnd <= parsedStart) { setValidation('The interval must end after it starts.'); return; }
+    if (audioDurationMs !== undefined && parsedEnd > audioDurationMs) { setValidation('The interval cannot extend past the audio duration.'); return; }
+    if (project.score.events.some(item => item.channelId === channel.id && parsedStart < item.endMs && item.startMs < parsedEnd)) { setValidation('The interval overlaps another event on this channel.'); return; }
+    setValidation(null);
+    if (!onAdd(parsedStart, parsedEnd)) setValidation('The interval could not be added. Check its timing and channel.');
+  };
+  return <div className="dialog-backdrop"><form className="dialog" role="dialog" aria-modal="true" aria-labelledby="add-interval-title" onSubmit={submit}><h2 id="add-interval-title">Add Light Interval</h2><div className="property-readonly"><span>Channel</span><strong>{channel.displayName}</strong></div><label htmlFor="interval-start">Start</label><input id="interval-start" aria-label="Start" autoFocus value={start} onChange={event => setStart(event.target.value)}/><label htmlFor="interval-end">End</label><input id="interval-end" aria-label="End" value={end} onChange={event => setEnd(event.target.value)}/>{validation && <p className="field-error" role="alert">{validation}</p>}<div className="dialog-actions"><button type="button" className="button secondary" onClick={onClose}>Cancel</button><button className="button primary">Add Interval</button></div></form></div>;
 }
 
 function InspectorForm({ title, id, type, summary, fields, action }: { title: string; id: string; type?: string; summary?: string; fields: { label: string; value: string; inputMode?: 'numeric'; save: (value: string) => boolean }[]; action?: ReactNode }) {

@@ -9,6 +9,16 @@ async function createProject(name = 'Aurora Show') {
   await screen.findByLabelText(`${name} editor`);
 }
 
+async function createChannel() {
+  fireEvent.click(screen.getAllByRole('button', { name: 'Add Costume' })[0]); fireEvent.click(screen.getAllByRole('button', { name: 'Add Costume' }).at(-1)!);
+  fireEvent.click(screen.getAllByRole('button', { name: 'Add Pico' }).at(-1)!); fireEvent.click(screen.getAllByRole('button', { name: 'Add Pico' }).at(-1)!);
+  fireEvent.click(screen.getAllByRole('button', { name: 'Add Channel' }).at(-1)!);
+  fireEvent.change(screen.getByLabelText('Display name'), { target: { value: 'Body outline' } });
+  fireEvent.change(screen.getByLabelText('Hardware output identifier'), { target: { value: 'GP0' } });
+  fireEvent.click(screen.getAllByRole('button', { name: 'Add Channel' }).at(-1)!);
+  fireEvent.click(screen.getByRole('button', { name: 'Move Body outline up' }).closest('.tree-item')!);
+}
+
 describe('desktop application shell', () => {
   it('starts with New, Open, and an empty recent-projects state', () => { render(<App />); expect(screen.getByRole('button', { name: 'New Project' })).toBeInTheDocument(); expect(screen.getByRole('button', { name: 'Open Project' })).toBeInTheDocument(); expect(screen.getByText('No recent projects')).toBeInTheDocument(); });
   it('creates an unsaved dirty project directly in Editor', async () => { render(<App />); await createProject(); expect(screen.getByRole('heading', { name: 'Editor', level: 1 })).toBeInTheDocument(); expect(screen.getByLabelText('Project toolbar')).toHaveTextContent('Aurora Show *'); });
@@ -93,5 +103,30 @@ describe('desktop application shell', () => {
     render(<App />); await createProject(); fireEvent.click(screen.getAllByRole('button', { name: 'Add Costume' })[0]); fireEvent.click(screen.getAllByRole('button', { name: 'Add Costume' }).at(-1)!);
     fireEvent.click(screen.getByRole('button', { name: 'Collapse Costume 1' })); expect(screen.queryByText('ESP32 Master')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Expand Costume 1' })); expect(screen.getByText('ESP32 Master')).toBeInTheDocument(); expect(screen.getByLabelText('Project toolbar')).toHaveTextContent('Aurora Show *');
+  });
+
+  it('creates, selects, validates, cancels, and undoes a precisely timed score interval', async () => {
+    render(<App />); await createProject(); await createChannel();
+    expect(screen.getByRole('button', { name: '+ Add Interval' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '+ Add Interval' }));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveTextContent('Add Light Interval'); expect(dialog).toHaveTextContent('Body outline');
+    expect(screen.getByLabelText('Start')).toHaveValue('00:00.000'); expect(screen.getByLabelText('End')).toHaveValue('00:01.000');
+
+    fireEvent.change(screen.getByLabelText('Start'), { target: { value: 'not a time' } }); fireEvent.click(screen.getByRole('button', { name: 'Add Interval' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Enter time as MM:SS.mmm, HH:MM:SS.mmm, or milliseconds.');
+    fireEvent.change(screen.getByLabelText('Start'), { target: { value: '00:01.250' } }); fireEvent.change(screen.getByLabelText('End'), { target: { value: '00:01.250' } }); fireEvent.click(screen.getByRole('button', { name: 'Add Interval' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('The interval must end after it starts.');
+    fireEvent.change(screen.getByLabelText('End'), { target: { value: '00:01.780' } }); fireEvent.click(screen.getByRole('button', { name: 'Add Interval' }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument(); expect(screen.getByText('EVENT INSPECTOR')).toBeInTheDocument();
+    expect(screen.getByLabelText('Start')).toHaveValue('00:01.250'); expect(screen.getByLabelText('End')).toHaveValue('00:01.780');
+    expect(screen.getByRole('button', { name: /Body outline light interval/ })).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move Body outline up' }).closest('.tree-item')!); fireEvent.click(screen.getByRole('button', { name: '+ Add Interval' }));
+    fireEvent.change(screen.getByLabelText('Start'), { target: { value: '1300' } }); fireEvent.change(screen.getByLabelText('End'), { target: { value: '1600' } }); fireEvent.click(screen.getByRole('button', { name: 'Add Interval' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('The interval overlaps another event on this channel.');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' })); expect(screen.queryByRole('dialog')).not.toBeInTheDocument(); expect(screen.getAllByRole('button', { name: /Body outline light interval/ })).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' })); expect(screen.queryByRole('button', { name: /Body outline light interval/ })).not.toBeInTheDocument();
   });
 });
