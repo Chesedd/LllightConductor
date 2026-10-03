@@ -16,23 +16,26 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 using namespace master;
+namespace {
+void fail_startup(bool pending_verify,const char*reason){ESP_LOGE("master","Fatal initialization error: %s",reason);if(pending_verify){ESP_LOGE("master","Pending OTA image failed startup; rolling back");esp_ota_mark_app_invalid_rollback_and_reboot();}}
+}
 extern "C" void app_main(){
  constexpr int kPicoBaud=115200;
  bool pending_verify=false;const esp_partition_t*running=esp_ota_get_running_partition();esp_ota_img_states_t image_state{};if(esp_ota_get_state_partition(running,&image_state)==ESP_OK&&image_state==ESP_OTA_IMG_PENDING_VERIFY){pending_verify=true;ESP_LOGW("master","OTA image pending verification");}
- esp_err_t nvs=nvs_flash_init();if(nvs==ESP_ERR_NVS_NO_FREE_PAGES||nvs==ESP_ERR_NVS_NEW_VERSION_FOUND){ESP_ERROR_CHECK(nvs_flash_erase());nvs=nvs_flash_init();}if(nvs!=ESP_OK){ESP_LOGE("master","OTA startup self-check failed; rolling back");if(pending_verify)esp_ota_mark_app_invalid_rollback_and_reboot();return;}
+ esp_err_t nvs=nvs_flash_init();if(nvs==ESP_ERR_NVS_NO_FREE_PAGES||nvs==ESP_ERR_NVS_NEW_VERSION_FOUND){ESP_ERROR_CHECK(nvs_flash_erase());nvs=nvs_flash_init();}if(nvs!=ESP_OK){fail_startup(pending_verify,"NVS init failed");return;}
  static EspNetworkConfigStore network_store(NetworkConfig{CONFIG_LLLIGHT_DESKTOP_WIFI_SSID,CONFIG_LLLIGHT_DESKTOP_WIFI_PASSWORD,CONFIG_LLLIGHT_DESKTOP_TCP_PORT});NetworkConfig network;network_store.load(network);static EspFirmwareUpdater firmware_updater;static EspSystemControl system_control;
  constexpr uint8_t kBenchSlaveAddress=7;
 #ifdef CONFIG_LLLIGHT_PICO_BENCH_RESET_LOOP
  constexpr int64_t kBenchPeriodUs=1000000;
 #endif
  static constexpr UartConfig pico_uart_config{uart_port_t(CONFIG_LLLIGHT_PICO_UART_PORT),CONFIG_LLLIGHT_PICO_UART_TX_PIN,UART_PIN_NO_CHANGE,kPicoBaud,kBenchSlaveAddress};
- static EspUartTransport uart(pico_uart_config);static EspClock clock;if(!uart.init()){ESP_LOGE("master","Pico UART init failed");return;}
+ static EspUartTransport uart(pico_uart_config);static EspClock clock;if(!uart.init()){fail_startup(pending_verify,"Pico UART init failed");return;}
  #ifdef CONFIG_LLLIGHT_DESKTOP_TRANSPORT_TCP
  static EspDesktopTcp desktop(DesktopTcpConfig{network.ssid,network.password,network.tcp_port});
 #else
  static EspDesktopUart desktop(DesktopUartConfig{CONFIG_LLLIGHT_DESKTOP_UART_PORT,CONFIG_LLLIGHT_DESKTOP_UART_TX_PIN,CONFIG_LLLIGHT_DESKTOP_UART_RX_PIN,460800});
 #endif
- if(!desktop.init()){ESP_LOGE("master","Desktop transport init failed");return;}
+ if(!desktop.init()){fail_startup(pending_verify,"Desktop transport init failed");return;}
  static PicoCommandSender sender(uart,esp_random());static ShowScheduler* scheduler_ptr=nullptr;
 #ifdef CONFIG_LLLIGHT_PICO_BENCH_RESET_LOOP
  if(!sender.add_slave(kBenchSlaveAddress)){ESP_LOGE("master","PICO BENCH failed to register slave=%u",unsigned(kBenchSlaveAddress));return;}
@@ -49,7 +52,7 @@ extern "C" void app_main(){
 #ifdef CONFIG_LLLIGHT_DESKTOP_TRANSPORT_TCP
  commands.set_recovery_mode(desktop.recovery_mode());
 #endif
- if(pending_verify&&esp_timer_get_time()>=healthy_after){if(esp_ota_mark_app_valid_cancel_rollback()==ESP_OK)ESP_LOGI("master","OTA image confirmed");pending_verify=false;}auto dn=desktop.receive(desktop_rx,sizeof desktop_rx);if(dn)commands.ingest(desktop_rx,dn);commands.tick();if(controller.state()!=prior){prior=controller.state();ESP_LOGI("master","state=%u",unsigned(prior));}auto&d=scheduler.diagnostics();if(d.dispatched_frame_count!=prior_frames){prior_frames=d.dispatched_frame_count;ESP_LOGI("master","frame=%lu lateness_us=%lld max_us=%lld",static_cast<unsigned long>(prior_frames),static_cast<long long>(d.last_lateness_us),static_cast<long long>(d.max_lateness_us));}
+ if(pending_verify&&esp_timer_get_time()>=healthy_after&&desktop.maintenance_ready()){if(esp_ota_mark_app_valid_cancel_rollback()==ESP_OK){ESP_LOGI("master","OTA image confirmed after healthy maintenance transport");pending_verify=false;}}auto dn=desktop.receive(desktop_rx,sizeof desktop_rx);if(dn)commands.ingest(desktop_rx,dn);commands.tick();if(controller.state()!=prior){prior=controller.state();ESP_LOGI("master","state=%u",unsigned(prior));}auto&d=scheduler.diagnostics();if(d.dispatched_frame_count!=prior_frames){prior_frames=d.dispatched_frame_count;ESP_LOGI("master","frame=%lu lateness_us=%lld max_us=%lld",static_cast<unsigned long>(prior_frames),static_cast<long long>(d.last_lateness_us),static_cast<long long>(d.max_lateness_us));}
 #ifdef CONFIG_LLLIGHT_PICO_BENCH_RESET_LOOP
   const int64_t bench_now_us=clock.now_us();
   if(bench_now_us>=next_bench_reset_us){

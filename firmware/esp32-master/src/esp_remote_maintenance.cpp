@@ -50,6 +50,10 @@ bool EspFirmwareUpdater::begin(uint32_t size,
   mbedtls_sha256_init(&sha_);
   if (mbedtls_sha256_starts(&sha_, 0) != 0) {
     esp_ota_abort(handle_);
+    mbedtls_sha256_free(&sha_);
+    handle_ = 0;
+    partition_ = nullptr;
+    active_ = false;
     return false;
   }
   active_ = true;
@@ -68,14 +72,21 @@ bool EspFirmwareUpdater::finish(std::array<uint8_t, 32> &actual) {
   if (actual != expected_) {
     esp_ota_abort(handle_);
     active_ = false;
+    handle_ = 0;
+    partition_ = nullptr;
     return false;
   }
   if (esp_ota_end(handle_) != ESP_OK) {
     active_ = false;
+    handle_ = 0;
+    partition_ = nullptr;
     return false;
   }
   active_ = false;
-  return esp_ota_set_boot_partition(partition_) == ESP_OK;
+  const auto *partition = partition_;
+  handle_ = 0;
+  partition_ = nullptr;
+  return esp_ota_set_boot_partition(partition) == ESP_OK;
 }
 void EspFirmwareUpdater::cancel() {
   if (active_) {
@@ -83,6 +94,7 @@ void EspFirmwareUpdater::cancel() {
     mbedtls_sha256_free(&sha_);
   }
   active_ = false;
+  handle_ = 0;
   partition_ = nullptr;
 }
 void EspSystemControl::restart() { esp_restart(); }

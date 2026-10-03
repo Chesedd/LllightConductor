@@ -264,6 +264,13 @@ int main() {
   req.payload_size = 37;
   CHECK(transact(cp, dw, req).type ==
         desktop_protocol::Type::FirmwareUpdateReady);
+  req.type = desktop_protocol::Type::ActivateShow;
+  req.sequence++;
+  req.payload_size = 32;
+  auto activate_during_firmware = transact(cp, dw, req);
+  CHECK(activate_during_firmware.type == desktop_protocol::Type::Nack &&
+        activate_during_firmware.payload[0] ==
+            uint8_t(desktop_protocol::Nack::Busy));
   req.type = desktop_protocol::Type::FirmwareUpdateChunk;
   req.sequence++;
   desktop_protocol::write32(req.payload.data(), 0);

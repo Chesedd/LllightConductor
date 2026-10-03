@@ -18,6 +18,7 @@ public:
   size_t receive(uint8_t *buffer, size_t capacity);
   bool send(const uint8_t *bytes, size_t count) override;
   bool recovery_mode() const { return recovery_; }
+  bool maintenance_ready() const { return got_ip_ || recovery_; }
 
 private:
   static void event_handler(void *arg, const char *base, int32_t id,

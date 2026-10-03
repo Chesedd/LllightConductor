@@ -314,6 +314,8 @@ Frame DesktopCommandProcessor::dispatch(const Frame &r) {
     return response(r, Type::UploadComplete, hash.data(), hash.size());
   }
   case Type::ActivateShow: {
+    if (firmware_upload_)
+      return nack(r, Nack::Busy);
     if (state() == 3 || upload_)
       return nack(r, Nack::InvalidState);
     if (r.payload_size != 32)
